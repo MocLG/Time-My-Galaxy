@@ -1,0 +1,850 @@
+package dev.lukag.timemygalaxy;
+
+import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.SharedPreferences;
+import android.content.res.Configuration;
+import android.graphics.Insets;
+import android.graphics.Typeface;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.text.InputType;
+import android.text.Spannable;
+import android.text.SpannableStringBuilder;
+import android.text.method.ScrollingMovementMethod;
+import android.text.style.ForegroundColorSpan;
+import android.text.style.StyleSpan;
+import android.text.style.UnderlineSpan;
+import android.view.View;
+import android.view.ViewGroup;
+import android.view.WindowInsets;
+import android.view.WindowManager;
+import android.widget.Button;
+import android.widget.CheckBox;
+import android.widget.EditText;
+import android.widget.LinearLayout;
+import android.widget.ScrollView;
+import android.widget.TextView;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+/**
+ * Runs the SM-S731B timerfd exploit from the Shizuku shell user (uid 2000).
+ *
+ * The exploit parks forever once the helper has run, so the process is never
+ * destroyed on success or when the activity closes. A planted run needs a
+ * reboot to clean up; killing it can panic the kernel.
+ */
+public class MainActivity extends Activity implements PayloadStore.Log {
+
+    private static final int REQUEST_SHIZUKU = 0x5752;
+    private static final String SHELL_PATH =
+            "/product/bin:/apex/com.android.runtime/bin:/apex/com.android.art/bin:"
+                    + "/apex/com.android.virt/bin:/system_ext/bin:/system/bin:/system/xbin:"
+                    + "/odm/bin:/vendor/bin:/vendor/xbin";
+    private static final long SUPERVISE_MS = 6 * 60 * 1000L;
+    private static final long POLL_MS = 500L;
+    private static final int LOG_LIMIT = 150_000;
+    private static final String UI_PREFS = "wroot-ui";
+    private static final String PREF_DARK = "dark";
+    private static final String LOAD_LOG = PayloadStore.REMOTE_DIR + "/wr_load.log";
+    private static final String EXEC_LOG = PayloadStore.REMOTE_DIR + "/wr_exec.log";
+    private static final String RUN_LOG = PayloadStore.REMOTE_DIR + "/run.log";
+
+    private final ExecutorService executor = Executors.newSingleThreadExecutor();
+    private final Handler ui = new Handler(Looper.getMainLooper());
+    private final AtomicBoolean busy = new AtomicBoolean();
+    private final StringBuilder logBuffer = new StringBuilder();
+
+    private TextView statusView;
+    private TextView gateView;
+    private TextView logView;
+    private ScrollView logScroll;
+    private boolean followLogs = true;
+    private Button grantButton;
+    private Button stageButton;
+    private Button runButton;
+    private Button stopButton;
+    private Button checkButton;
+    private Button commandButton;
+    private EditText commandInput;
+    private CheckBox darkCheck;
+    private volatile Process tailProcess;
+    private volatile String exploitPid;
+    private volatile Targets.Target target;
+    private DeviceGate.Result gateResult;
+
+    private volatile boolean ksuReady;
+    private boolean darkTheme;
+    private int ansiDefaultColor = 0xFFF0F0F0;
+
+    private boolean isDarkEnabled() {
+        SharedPreferences prefs = getSharedPreferences(UI_PREFS, MODE_PRIVATE);
+        if (prefs.contains(PREF_DARK)) {
+            return prefs.getBoolean(PREF_DARK, false);
+        }
+        return (getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK)
+                == Configuration.UI_MODE_NIGHT_YES;
+    }
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        darkTheme = isDarkEnabled();
+        ansiDefaultColor = darkTheme ? 0xFFF2F2F2 : 0xFF111111;
+        setTheme(darkTheme ? android.R.style.Theme_Material
+                : android.R.style.Theme_Material_Light);
+        super.onCreate(savedInstanceState);
+        setContentView(buildUi());
+
+        gateResult = DeviceGate.check();
+        target = gateResult.target;
+        gateView.setText(gateResult.detail);
+        appendLog("Time-My-Galaxy\n");
+        if (target == null) {
+            appendLog("[-] no payload for this firmware\n");
+        } else {
+            appendLog("[+] target " + target.build + " (" + target.describe() + ")\n");
+        }
+        appendLog("Transport: Shizuku shell (uid 2000)\n\n");
+        refreshStatus();
+        if (target == null) {
+            ui.post(this::showUnsupportedDialog);
+        }
+        executor.execute(() -> {
+            boolean staged = ShizukuBridge.isRunning() && ShizukuBridge.isGranted()
+                    && PayloadStore.isStaged(getAssets());
+            ui.post(() -> appendLog(staged
+                    ? "[+] payloads already staged in " + PayloadStore.REMOTE_DIR + "\n"
+                    : "[*] payloads not staged yet\n"));
+        });
+    }
+
+    private View buildUi() {
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        final int pad = dp(16);
+        root.setPadding(pad, pad, pad, pad);
+        root.setOnApplyWindowInsetsListener((view, insets) -> {
+            Insets bars = insets.getInsets(
+                    WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+            view.setPadding(pad + bars.left, pad + bars.top, pad + bars.right, pad + bars.bottom);
+            return insets;
+        });
+
+        TextView title = new TextView(this);
+        title.setText("Time-My-Galaxy");
+        title.setTextSize(22);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setTextColor(accentColor());
+        root.addView(title);
+
+        statusView = new TextView(this);
+        statusView.setTextSize(14);
+        statusView.setPadding(0, dp(8), 0, dp(4));
+        statusView.setTextColor(accentColor());
+        root.addView(statusView);
+
+        gateView = new TextView(this);
+        gateView.setTextSize(12);
+        gateView.setTypeface(Typeface.MONOSPACE);
+        gateView.setPadding(0, 0, 0, dp(8));
+        root.addView(gateView);
+
+        LinearLayout row1 = new LinearLayout(this);
+        row1.setOrientation(LinearLayout.HORIZONTAL);
+        grantButton = button("Grant Shizuku");
+        grantButton.setOnClickListener(v -> requestShizuku());
+        stageButton = button("Stage payloads");
+        stageButton.setOnClickListener(v -> stagePayloads());
+        row1.addView(grantButton, weight());
+        row1.addView(stageButton, weight());
+        root.addView(row1);
+
+        LinearLayout row2 = new LinearLayout(this);
+        row2.setOrientation(LinearLayout.HORIZONTAL);
+        runButton = button("Plant exploit");
+        runButton.setOnClickListener(v -> confirmRun());
+        stopButton = button("Stop (unsafe)");
+        stopButton.setOnClickListener(v -> stopActive());
+        row2.addView(runButton, weight());
+        row2.addView(stopButton, weight());
+        root.addView(row2);
+
+        darkCheck = new CheckBox(this);
+        darkCheck.setText("Dark mode");
+        darkCheck.setTextSize(12);
+        darkCheck.setChecked(isDarkEnabled());
+        darkCheck.setOnCheckedChangeListener((buttonView, checked) -> {
+            getSharedPreferences(UI_PREFS, MODE_PRIVATE).edit()
+                    .putBoolean(PREF_DARK, checked).apply();
+            recreate();
+        });
+        root.addView(darkCheck);
+
+        TextView rootLabel = new TextView(this);
+        rootLabel.setText("Root command (after the helper reports done)");
+        rootLabel.setTextSize(14);
+        rootLabel.setPadding(0, dp(8), 0, 0);
+        rootLabel.setTextColor(accentColor());
+        root.addView(rootLabel);
+
+        commandInput = new EditText(this);
+        commandInput.setHint("id");
+        commandInput.setText("id");
+        commandInput.setSingleLine(true);
+        commandInput.setInputType(InputType.TYPE_CLASS_TEXT);
+        root.addView(commandInput);
+
+        LinearLayout row3 = new LinearLayout(this);
+        row3.setOrientation(LinearLayout.HORIZONTAL);
+        commandButton = button("Run as root");
+        commandButton.setOnClickListener(v -> runRootCommand());
+        checkButton = button("Check root");
+        checkButton.setOnClickListener(v -> {
+            commandInput.setText("id");
+            runRootCommand();
+        });
+        row3.addView(commandButton, weight());
+        row3.addView(checkButton, weight());
+        root.addView(row3);
+
+        logScroll = new ScrollView(this);
+        LinearLayout.LayoutParams scrollParams =
+                new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
+        scrollParams.topMargin = dp(8);
+        logScroll.setLayoutParams(scrollParams);
+        logScroll.setOnScrollChangeListener((view, scrollX, scrollY, oldScrollX, oldScrollY) ->
+                followLogs = isLogAtBottom());
+
+        logView = new TextView(this);
+        logView.setTextSize(11);
+        logView.setTextColor(ansiDefaultColor);
+        logView.setTypeface(Typeface.MONOSPACE);
+        logView.setTextIsSelectable(true);
+        logView.setMovementMethod(new ScrollingMovementMethod());
+        logView.setPadding(dp(8), dp(8), dp(8), dp(8));
+        logScroll.addView(logView, new ScrollView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        root.addView(logScroll);
+
+        return root;
+    }
+
+    private Button button(String text) {
+        Button button = new Button(this);
+        button.setText(text);
+        return button;
+    }
+
+    private LinearLayout.LayoutParams weight() {
+        LinearLayout.LayoutParams params =
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        params.setMarginStart(dp(4));
+        params.setMarginEnd(dp(4));
+        return params;
+    }
+
+    private int dp(int value) {
+        return Math.round(value * getResources().getDisplayMetrics().density);
+    }
+
+    private void refreshStatus() {
+        boolean running = ShizukuBridge.isRunning();
+        boolean granted = running && ShizukuBridge.isGranted();
+        statusView.setText("Shizuku: " + (running
+                ? (granted ? "running, granted" : "running, permission needed")
+                : "not running")
+                + "   |   Target: " + (target == null ? "unsupported" : target.build)
+                + "   |   Root: " + (ksuReady ? "KernelSU" : "not loaded"));
+        boolean runnable = target != null;
+        grantButton.setEnabled(!busy.get());
+        stageButton.setEnabled(!busy.get() && granted && runnable);
+        runButton.setEnabled(!busy.get() && granted && runnable);
+        stopButton.setEnabled(busy.get());
+        commandButton.setEnabled(!busy.get() && granted);
+        checkButton.setEnabled(!busy.get() && granted);
+    }
+
+    private void setBusy(boolean value) {
+        Runnable apply = () -> {
+            busy.set(value);
+            getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            if (value) {
+                getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            }
+            refreshStatus();
+        };
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            apply.run();
+        } else {
+            ui.post(apply);
+        }
+    }
+
+    private void requestShizuku() {
+        if (!ShizukuBridge.isRunning()) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Shizuku is not running")
+                    .setMessage("Start Shizuku as the shell user first.\n\n"
+                            + "Without a PC: pair through Shizuku's on-device wireless "
+                            + "debugging flow and start the service. With a PC: run\n"
+                            + "adb shell sh /storage/emulated/0/Android/data/"
+                            + "moe.shizuku.privileged.api/start.sh\n\n"
+                            + "The exploit always runs as uid 2000, never in the app sandbox.")
+                    .setPositiveButton("OK", null)
+                    .show();
+            return;
+        }
+        ShizukuBridge.requestPermission(REQUEST_SHIZUKU, (granted, error) -> runOnUiThread(() -> {
+            appendLog(granted ? "[+] Shizuku permission granted\n"
+                    : "[-] " + (error == null ? "Shizuku permission denied" : error) + "\n");
+            refreshStatus();
+        }));
+    }
+
+    private void stagePayloads() {
+        if (busy.get()) {
+            return;
+        }
+        executor.execute(() -> {
+            setBusy(true);
+            try {
+                appendLog("[*] staging payloads into " + PayloadStore.REMOTE_DIR + "\n");
+                PayloadStore.stageAll(getAssets(), this);
+                appendLog("[+] staging complete\n");
+            } catch (Throwable t) {
+                appendLog("[-] staging failed: " + t.getMessage() + "\n");
+            } finally {
+                setBusy(false);
+            }
+        });
+    }
+
+    private void confirmRun() {
+        gateResult = DeviceGate.check();
+        target = gateResult.target;
+        gateView.setText(gateResult.detail);
+        refreshStatus();
+        if (target == null) {
+            showUnsupportedDialog();
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("Plant the exploit?")
+                .setMessage("Runs timer_s25fe as uid 2000 (Shizuku shell).\n\n"
+                        + "- One plant per boot. If this boot already ran it, reboot first.\n"
+                        + "- Takes roughly 30-60 s; keep the screen on and leave the phone alone.\n"
+                        + "- On success the process parks forever and must not be killed.\n"
+                        + "- A failed plant also needs a reboot, and either can panic the kernel.\n\n"
+                        + "Run only on a device you own.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Run", (d, w) -> executeExploit())
+                .show();
+    }
+
+    private void executeExploit() {
+        if (busy.get()) {
+            return;
+        }
+        if (!ShizukuBridge.isRunning() || !ShizukuBridge.isGranted()) {
+            requestShizuku();
+            return;
+        }
+        executor.execute(() -> {
+            setBusy(true);
+            Process tail = null;
+            try {
+                if (!PayloadStore.isStaged(getAssets())) {
+                    appendLog("[*] payloads missing, staging first\n");
+                    PayloadStore.stageAll(getAssets(), this);
+                }
+
+                String parked = readPidOrNull();
+                if (parked == null) {
+                    appendLog("[-] lost Shizuku before planting\n");
+                    return;
+                }
+                if (!parked.isEmpty()) {
+                    appendLog("[-] timer_s25fe already running: pid " + parked + "\n");
+                    appendLog("[i] a planted run is cleaned only by reboot\n");
+                    return;
+                }
+
+                String cleared = captureShell("rm -f " + quote(LOAD_LOG) + " "
+                        + quote(EXEC_LOG) + " " + quote(RUN_LOG)
+                        + "; if [ -e " + quote(LOAD_LOG) + " ] || [ -e " + quote(RUN_LOG)
+                        + " ]; then echo stale; else touch " + quote(RUN_LOG)
+                        + " && echo cleaned; fi", 8000L).trim();
+                if (!cleared.contains("cleaned")) {
+                    appendLog("[-] cannot clear old logs: "
+                            + (cleared.isEmpty() ? "no output" : cleared) + "\n");
+                    return;
+                }
+
+                String[] env = new String[]{
+                        "PATH=" + SHELL_PATH,
+                        "HOME=" + PayloadStore.REMOTE_DIR,
+                        "TK_SPRAY=socket",
+                };
+                // New session + file-backed stdio: neither Shizuku's process
+                // group nor its log pipe can end the exploit when it restarts.
+                String launch = "cd " + quote(PayloadStore.REMOTE_DIR)
+                        + " && trap '' 1 13"
+                        + " && if command -v setsid >/dev/null 2>&1"
+                        + " && setsid true 2>/dev/null; then"
+                        + " echo 'launcher: setsid' >> " + quote(RUN_LOG) + ";"
+                        + " setsid ./timer_s25fe >> " + quote(RUN_LOG)
+                        + " 2>&1 < /dev/null &"
+                        + " else echo 'launcher: fallback' >> " + quote(RUN_LOG) + ";"
+                        + " ./timer_s25fe >> " + quote(RUN_LOG)
+                        + " 2>&1 < /dev/null & fi";
+                appendLog("[*] planting timer_s25fe detached from Shizuku\n");
+                Process launcher = ShizukuBridge.exec(
+                        new String[]{"/system/bin/sh", "-c", launch},
+                        env, PayloadStore.REMOTE_DIR);
+                pump(launcher.getInputStream(), "launch");
+                pump(launcher.getErrorStream(), "launch-err");
+                long launchDeadline = System.currentTimeMillis() + 10000;
+                while (launcher.isAlive() && System.currentTimeMillis() < launchDeadline) {
+                    Thread.sleep(100);
+                }
+                if (launcher.isAlive()) {
+                    appendLog("[!] launcher did not exit\n");
+                }
+
+                String pid = "";
+                boolean unknown = false;
+                long waitStart = System.currentTimeMillis();
+                while (System.currentTimeMillis() - waitStart < 15000) {
+                    String now = readPidOrNull();
+                    if (now == null) {
+                        unknown = true;
+                    } else if (!now.isEmpty()) {
+                        pid = now;
+                        break;
+                    }
+                    Thread.sleep(300);
+                }
+                if (pid.isEmpty()) {
+                    appendLog(unknown
+                            ? "[-] cannot see timer_s25fe; Shizuku is unavailable\n"
+                            : "[-] timer_s25fe did not start\n");
+                    String runTail = captureShell("tail -c 4096 " + quote(RUN_LOG)
+                            + " 2>/dev/null", 5000L);
+                    if (!runTail.trim().isEmpty() && !runTail.startsWith("error:")) {
+                        appendLog("[i] run.log:\n" + runTail.trim() + "\n");
+                    }
+                    return;
+                }
+                exploitPid = pid;
+                appendLog("[i] pid " + pid + " oom_score_adj " + readAdj(pid) + "\n");
+                appendLog("[i] detached: own session, stdout in " + RUN_LOG + "\n");
+
+                try {
+                    tail = ShizukuBridge.exec(new String[]{"/system/bin/sh", "-c",
+                                    "trap '' 1 13; exec tail -n +1 -f " + quote(RUN_LOG)},
+                            null, PayloadStore.REMOTE_DIR);
+                    tailProcess = tail;
+                    pump(tail.getInputStream(), "out");
+                    pump(tail.getErrorStream(), "err");
+                } catch (Throwable t) {
+                    appendLog("[!] live log unavailable: " + t.getMessage() + "\n");
+                }
+
+                long startedAt = System.currentTimeMillis();
+                String logTail = "";
+                boolean done = false;
+                boolean alive = true;
+                boolean lost = false;
+                long lastPidCheck = 0;
+                while (true) {
+                    logTail = captureShell("tail -c 4096 " + quote(LOAD_LOG)
+                            + " 2>/dev/null", 8000L);
+                    if (!logTail.startsWith("error:") && logTail.contains("done")) {
+                        done = true;
+                        break;
+                    }
+                    if (System.currentTimeMillis() - startedAt > SUPERVISE_MS) {
+                        break;
+                    }
+                    if (System.currentTimeMillis() - lastPidCheck >= 2000) {
+                        lastPidCheck = System.currentTimeMillis();
+                        String now = readPidOrNull();
+                        if (now == null) {
+                            if (!lost) {
+                                appendLog("[!] Shizuku unavailable; exploit is detached, "
+                                        + "supervision paused\n");
+                                lost = true;
+                            }
+                        } else if (now.isEmpty()) {
+                            Thread.sleep(300);
+                            now = readPidOrNull();
+                            if (now != null && now.isEmpty()) {
+                                alive = false;
+                                break;
+                            }
+                            if (now != null) {
+                                exploitPid = now;
+                                lost = false;
+                            }
+                        } else {
+                            exploitPid = now;
+                            lost = false;
+                        }
+                    }
+                    Thread.sleep(POLL_MS);
+                }
+
+                long elapsed = (System.currentTimeMillis() - startedAt) / 1000;
+                if (!done) {
+                    logTail = captureShell("tail -c 4096 " + quote(LOAD_LOG)
+                            + " 2>/dev/null", 8000L);
+                    done = !logTail.startsWith("error:") && logTail.contains("done");
+                }
+
+                if (done) {
+                    appendLog("[+] helper reached done after " + elapsed + "s\n");
+                    String id = captureShell("su -c " + quote("id"), 20000L).trim();
+                    appendLog("[*] su -c id: " + id + "\n");
+                    if (id.contains("uid=0")) {
+                        ksuReady = true;
+                        appendLog("[+] KernelSU root is live\n");
+                        hardenParkedProcess();
+                    } else {
+                        appendLog("[!] helper finished but su did not return uid=0\n");
+                    }
+                    appendLog("[i] exploit stays parked until reboot; do not kill it\n");
+                } else if (!alive) {
+                    appendLog("[-] timer_s25fe disappeared before done after "
+                            + elapsed + "s\n");
+                    if (!logTail.trim().isEmpty() && !logTail.startsWith("error:")) {
+                        appendLog("[i] helper log tail:\n" + logTail.trim() + "\n");
+                    }
+                    appendLog("[i] reboot before trying again\n");
+                } else if (lost) {
+                    appendLog("[!] lost Shizuku for " + elapsed
+                            + "s; the exploit is detached and may still be running\n");
+                    appendLog("[i] do not replant; reboot if you want to retry\n");
+                } else {
+                    appendLog("[!] no done after " + elapsed + "s; exploit still running\n");
+                    appendLog("[i] leave it parked and reboot when you want to retry\n");
+                    if (!logTail.trim().isEmpty() && !logTail.startsWith("error:")) {
+                        appendLog("[i] helper log tail:\n" + logTail.trim() + "\n");
+                    }
+                }
+            } catch (Throwable t) {
+                appendLog("[-] run failed: " + t.getMessage() + "\n");
+            } finally {
+                if (tail != null) {
+                    try {
+                        Thread.sleep(500);
+                    } catch (InterruptedException ignored) {
+                    }
+                    if (tail.isAlive()) {
+                        tail.destroy();
+                    }
+                    tailProcess = null;
+                }
+                setBusy(false);
+            }
+        });
+    }
+
+    private void stopActive() {
+        String pid = exploitPid;
+        if (pid == null || !pid.matches("\\d+")) {
+            String now = readPidOrNull();
+            pid = now == null ? "" : now;
+        }
+        if (pid.isEmpty()) {
+            appendLog("[i] nothing to stop\n");
+            return;
+        }
+        final String targetPid = pid;
+        new AlertDialog.Builder(this)
+                .setTitle("Kill the exploit?")
+                .setMessage("Killing a planted exploit can panic the kernel.\n\n"
+                        + "The safe cleanup is a reboot. Kill anyway?")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Kill (unsafe)", (d, w) -> {
+                    appendLog("[!] killing pid " + targetPid + "\n");
+                    new Thread(() -> {
+                        String out = captureShell("kill -9 " + targetPid + " 2>&1", 8000L);
+                        if (!out.trim().isEmpty() && !out.startsWith("error:")) {
+                            appendLog(out.trim() + "\n");
+                        }
+                        try {
+                            Thread.sleep(500);
+                        } catch (InterruptedException ignored) {
+                        }
+                        String now = readPidOrNull();
+                        if (now == null) {
+                            appendLog("[!] Shizuku unavailable; check pidof manually\n");
+                        } else if (now.isEmpty()) {
+                            appendLog("[i] process gone; reboot before the next attempt\n");
+                        } else {
+                            appendLog("[!] still running; trying su\n");
+                            captureShell("su -c " + quote("kill -9 " + targetPid), 8000L);
+                        }
+                        exploitPid = null;
+                        setBusy(false);
+                    }, "stop-exploit").start();
+                })
+                .show();
+    }
+
+    private void runRootCommand() {
+        if (busy.get()) {
+            return;
+        }
+        if (!ShizukuBridge.isRunning() || !ShizukuBridge.isGranted()) {
+            requestShizuku();
+            return;
+        }
+        String command = commandInput.getText().toString().trim();
+        if (command.isEmpty()) {
+            command = "id";
+        }
+        final String finalCommand = command;
+        executor.execute(() -> {
+            setBusy(true);
+            try {
+                appendLog("$ su -c " + finalCommand + "\n");
+                String out = captureShell("su -c " + ShizukuBridge.shellQuote(finalCommand),
+                        20000L);
+                appendLog(out.endsWith("\n") || out.isEmpty() ? out : out + "\n");
+                if (out.contains("uid=0")) {
+                    ksuReady = true;
+                    ui.post(this::refreshStatus);
+                }
+            } finally {
+                setBusy(false);
+            }
+        });
+    }
+
+    /**
+     * Root can exempt the parked process from LMKD. It does not make the
+     * process immortal: SIGKILL from root/shell and reboot still end it.
+     */
+    private void hardenParkedProcess() {
+        String pid = readPidOrNull();
+        if ((pid == null || pid.isEmpty()) && exploitPid != null
+                && exploitPid.matches("\\d+")) {
+            pid = exploitPid;
+        }
+        if (pid == null || pid.isEmpty()) {
+            appendLog("[!] parked pid not found; cannot lower oom_score_adj\n");
+            return;
+        }
+        String before = readAdj(pid);
+        captureShell("su -c " + quote("echo -1000 > /proc/" + pid + "/oom_score_adj"),
+                15000L);
+        String after = readAdj(pid);
+        appendLog("[i] parked pid " + pid + " oom_score_adj " + before
+                + " -> " + after + "\n");
+        if (!"-1000".equals(after)) {
+            appendLog("[!] oom_score_adj not lowered; avoid memory pressure while parked\n");
+        }
+    }
+
+    /**
+     * null means Shizuku could not be reached, empty means the process is gone.
+     */
+    private String readPidOrNull() {
+        String out = captureShell("pidof timer_s25fe 2>/dev/null", 5000L).trim();
+        if (out.startsWith("error:")) {
+            return null;
+        }
+        for (String part : out.split("\\s+")) {
+            if (part.matches("\\d+")) {
+                return part;
+            }
+        }
+        return "";
+    }
+
+    private String readAdj(String pid) {
+        String out = captureShell("cat /proc/" + pid + "/oom_score_adj 2>/dev/null",
+                5000L).trim();
+        return out.isEmpty() || out.startsWith("error:") ? "?" : out;
+    }
+
+    private static String quote(String value) {
+        return ShizukuBridge.shellQuote(value);
+    }
+
+    /** Runs a shell command through Shizuku with a timeout, merging stdout/stderr. */
+    private String captureShell(String command, long timeoutMs) {
+        Process process = null;
+        StringBuilder out = new StringBuilder();
+        try {
+            process = ShizukuBridge.exec(new String[]{"/system/bin/sh", "-c", command},
+                    null, PayloadStore.REMOTE_DIR);
+            final Process proc = process;
+            Thread stdout = drain(proc.getInputStream(), out);
+            Thread stderr = drain(proc.getErrorStream(), out);
+            // RemoteProcess.exitValue() is not an IllegalThreadStateException,
+            // so Process.waitFor(timeout) cannot be used here.
+            long deadline = System.currentTimeMillis() + timeoutMs;
+            while (process.isAlive() && System.currentTimeMillis() < deadline) {
+                Thread.sleep(50);
+            }
+            boolean timedOut = process.isAlive();
+            if (timedOut) {
+                appendLog("[!] command timed out after " + timeoutMs / 1000 + "s\n");
+                process.destroy();
+            }
+            stdout.join(1500);
+            stderr.join(1500);
+            synchronized (out) {
+                if (!timedOut && !ShizukuBridge.isRunning()) {
+                    return "error: shizuku unavailable";
+                }
+                return out.toString();
+            }
+        } catch (Throwable t) {
+            return "error: " + t.getMessage();
+        } finally {
+            if (process != null && process.isAlive()) {
+                process.destroy();
+            }
+        }
+    }
+
+    private Thread drain(InputStream stream, StringBuilder out) {
+        Thread thread = new Thread(() -> {
+            byte[] buffer = new byte[4096];
+            try {
+                int read;
+                while ((read = stream.read(buffer)) > 0) {
+                    synchronized (out) {
+                        out.append(new String(buffer, 0, read));
+                    }
+                }
+            } catch (IOException ignored) {
+            }
+        }, "capture");
+        thread.setDaemon(true);
+        thread.start();
+        return thread;
+    }
+
+    private Thread pump(InputStream stream, String tag) {
+        Thread thread = new Thread(() -> {
+            byte[] buffer = new byte[8192];
+            try {
+                int read;
+                while ((read = stream.read(buffer)) > 0) {
+                    String text = new String(buffer, 0, read);
+                    ui.post(() -> appendLog(text));
+                }
+            } catch (IOException ignored) {
+            }
+        }, "payload-" + tag);
+        thread.setDaemon(true);
+        thread.start();
+        return thread;
+    }
+
+    private void showUnsupportedDialog() {
+        new AlertDialog.Builder(this)
+                .setTitle("Firmware not supported")
+                .setMessage((gateResult == null ? "" : gateResult.detail + "\n\n")
+                        + "This app only ships a payload for " + targetLabel()
+                        + ".\n\nDo not run it on another build.")
+                .setPositiveButton("OK", null)
+                .show();
+    }
+
+    private String targetLabel() {
+        StringBuilder out = new StringBuilder();
+        for (Targets.Target item : Targets.all()) {
+            if (out.length() > 0) {
+                out.append(", ");
+            }
+            out.append(item.label());
+        }
+        return out.toString();
+    }
+
+    @Override
+    public void line(String text) {
+        appendLog(text + "\n");
+    }
+
+    private void appendLog(String text) {
+        ui.post(() -> {
+            boolean follow = followLogs;
+            logBuffer.append(text);
+            if (logBuffer.length() > LOG_LIMIT) {
+                logBuffer.delete(0, logBuffer.length() - LOG_LIMIT / 2);
+                logBuffer.insert(0, "[... earlier output dropped ...]\n");
+            }
+            logView.setText(renderLog());
+            if (follow) {
+                logScroll.post(() -> logScroll.scrollTo(0, logView.getBottom()));
+            }
+        });
+    }
+
+    private CharSequence renderLog() {
+        SpannableStringBuilder out = new SpannableStringBuilder();
+        for (AnsiLog.Run run : AnsiLog.parse(logBuffer, ansiDefaultColor, darkTheme)) {
+            int start = out.length();
+            out.append(run.text);
+            int end = out.length();
+            if (run.color != ansiDefaultColor) {
+                out.setSpan(new ForegroundColorSpan(run.color), start, end,
+                        Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+            }
+            if (run.bold) {
+                out.setSpan(new StyleSpan(Typeface.BOLD), start, end,
+                        Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+            }
+            if (run.italic) {
+                out.setSpan(new StyleSpan(Typeface.ITALIC), start, end,
+                        Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+            }
+            if (run.underline) {
+                out.setSpan(new UnderlineSpan(), start, end,
+                        Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+            }
+        }
+        return out;
+    }
+
+    private int accentColor() {
+        return darkTheme ? 0xFF6BE86B : 0xFF0A6B0A;
+    }
+
+    private boolean isLogAtBottom() {
+        View child = logScroll.getChildAt(0);
+        if (child == null || logScroll.getHeight() == 0) {
+            return true;
+        }
+        return child.getBottom() - (logScroll.getHeight() + logScroll.getScrollY()) <= dp(24);
+    }
+
+    @Override
+    protected void onDestroy() {
+        // Only the log tailer is ours to stop; the detached exploit must live.
+        Process tail = tailProcess;
+        if (tail != null) {
+            try {
+                if (tail.isAlive()) {
+                    tail.destroy();
+                }
+            } catch (Throwable ignored) {
+            }
+            tailProcess = null;
+        }
+        executor.shutdownNow();
+        super.onDestroy();
+    }
+}
