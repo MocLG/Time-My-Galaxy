@@ -14,7 +14,8 @@ inside its own sandbox.
 Time-My-Galaxy/
 ├── app/                      Android app (Java sources, manifest, icon)
 ├── assets/payload/
-│   └── S731BXXU9CZIF/        supported build: SM-S731B (S25 FE)
+│   ├── S731BXXU9CZIF/        SM-S731B (S25 FE)
+│   └── S731BXXS9CZJ2/        SM-S731B (S25 FE)
 ├── exploit/
 │   ├── build.sh              cross-compiles into assets/payload/
 │   └── src/
@@ -61,6 +62,18 @@ debug build does not need a key.
 
 Requires JDK 17, Android SDK platform 35, and
 `aarch64-linux-gnu-gcc` for the payload.
+
+## Payloads
+
+| Device | Firmware | `wr_timerfd` sha256 |
+|---|---|---|
+| SM-S731B (S25 FE) | `S731BXXU9CZIF` | `21e528e743cee0d489516483d8f7c8c901723717166e0e405928996313a58fb7` |
+| SM-S731B (S25 FE) | `S731BXXS9CZJ2` | `54e43e9ab2e122dde299f4982c6e63dc086cb6a4dd3d893f9bde5ce89110bbc0` |
+
+Each `profile.json` is the porter output copied unchanged from
+`port-out/<BUILD>/profile.json`. The app trusts only that schema. The porter
+sets `verified` with `--verified`, which is used only after the chain completes
+on the device.
 
 ## Use
 
@@ -146,15 +159,16 @@ and KMI.
 
 The directory name is the build id. The APK discovers every
 `assets/payload/*` directory that contains a `wr_timerfd` binary at runtime, so
-no Java table needs editing. `profile.json` supplies the model, SoC, Android
-version, and the `verified` flag. A directory without it is still usable but is
-treated as untested.
+no Java table needs editing. `profile.json` must be the porter-generated file,
+copied unchanged from `port-out/<BUILD>/profile.json`. A directory without it
+is still usable but is treated as untested.
 
 On start the app compares `Build.FINGERPRINT`, `VERSION.INCREMENTAL`, `DISPLAY`,
 and `ID` against the bundled build ids and selects the match (the longest build
 id wins). If the matched payload is not marked verified, **Stage payloads** and
-**Plant exploit** show a warning and require explicit confirmation. Only set
-`"verified": true` after the chain completes on the hardware.
+**Plant exploit** show a warning and require explicit confirmation. After the
+chain completes on the hardware, rerun the porter with `--verified`, copy the
+new `profile.json`, and rebuild. Do not hand-edit it.
 
 `MEMSTART_PAGE` is board runtime
 data and is not derivable from the firmware. The tool defaults to `0x80000`

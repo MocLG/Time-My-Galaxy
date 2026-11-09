@@ -1315,7 +1315,7 @@ def main(argv: list[str] | None = None) -> int:
         out_dir / "report.txt", build, model, soc, android, kernel_version,
         chosen, cfg, values, how, meta, inputs_meta, boot_meta, elf_path,
     )
-    verified = args.verified or build == "S731BXXU9CZIF"
+    verified = args.verified
     write_profile_json(
         out_dir / "profile.json", build, model, soc, android, kernel_version,
         chosen, cfg, values, how, meta, inputs_meta, boot_meta, elf_path,

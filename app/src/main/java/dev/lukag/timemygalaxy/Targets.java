@@ -13,9 +13,10 @@ import java.util.Locale;
 /**
  * Payload table, discovered from assets/payload/&lt;BUILD&gt;/.
  *
- * The directory name is the build id. profile.json adds model, SoC, Android
- * version and the verified flag. A directory without profile.json is still
- * usable but is treated as untested.
+ * The directory name is the build id. profile.json is the porter-generated
+ * file that adds model, SoC, Android version and the verified flag. A
+ * directory without a porter profile is still usable but is treated as
+ * untested.
  */
 final class Targets {
 
@@ -107,10 +108,14 @@ final class Targets {
         boolean verified = false;
         try (InputStream in = assets.open(base + "/profile.json")) {
             JSONObject profile = new JSONObject(readAll(in));
-            model = meta(profile, "model");
-            soc = meta(profile, "soc");
-            android = meta(profile, "android");
-            verified = profile.optBoolean("verified", false);
+            // Only the porter-generated schema is trusted for metadata and
+            // the verified flag. Hand-written profiles stay untested.
+            if (profile.optInt("schema", 0) > 0 && profile.has("values")) {
+                model = meta(profile, "model");
+                soc = meta(profile, "soc");
+                android = meta(profile, "android");
+                verified = profile.optBoolean("verified", false);
+            }
         } catch (Exception ignored) {
         }
         return new Target(build, model, soc, android, verified);
