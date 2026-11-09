@@ -56,7 +56,7 @@ final class Targets {
     private Targets() {
     }
 
-    /** Every payload directory that contains a timer_s25fe binary. */
+    /** Every payload directory that contains a wr_timerfd binary. */
     static List<Target> all(AssetManager assets) {
         List<Target> out = new ArrayList<>();
         try {
@@ -89,7 +89,7 @@ final class Targets {
             }
             boolean hasTimer = false;
             for (String file : files) {
-                if ("timer_s25fe".equals(file)) {
+                if ("wr_timerfd".equals(file)) {
                     hasTimer = true;
                     break;
                 }

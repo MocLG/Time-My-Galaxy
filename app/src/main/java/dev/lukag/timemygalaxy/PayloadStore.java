@@ -23,7 +23,7 @@ final class PayloadStore {
 
     static final String REMOTE_DIR = "/data/local/tmp/wr";
 
-    private static final String[] FILES = {"timer_s25fe", "wr_exec", "ksud"};
+    private static final String[] FILES = {"wr_timerfd", "wr_exec", "ksud"};
 
     private PayloadStore() {
     }

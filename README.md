@@ -14,13 +14,13 @@ Time-My-Galaxy/
 ├── app/                      Android app (Java sources, manifest, icon)
 ├── assets/payload/
 │   └── S731BXXU9CZIF/        binaries packaged into the APK
-│       ├── timer_s25fe       exploit
+│       ├── wr_timerfd       exploit
 │       ├── wr_exec           libc-free UMH exec shim
 │       └── ksud              KernelSU late-load helper
 ├── exploit/
 │   ├── build.sh              cross-compiles into assets/payload/
 │   └── src/
-│       ├── timer_s25fe.c     main chain
+│       ├── wr_timerfd.c     main chain
 │       ├── krw_root.c        kernel read/write helpers
 │       ├── cred_swap.c       credential helpers
 │       ├── wroot_stage.c     pipe -> workqueue UMH stage
@@ -40,7 +40,7 @@ exist in exactly one place. `exploit/build.sh` rebuilds them there.
 Most users only need the debug APK:
 
 ```sh
-./exploit/build.sh      # timer_s25fe + wr_exec -> assets/payload/...
+./exploit/build.sh      # wr_timerfd + wr_exec -> assets/payload/...
 ./build.sh              # debug APK (default)
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
@@ -66,7 +66,7 @@ Verified payload hashes:
 
 | file | sha256 |
 |---|---|
-| `timer_s25fe` | `fb6077efdbd95a1519ab879c510769a08ea49d110308e3c957f53f48eb122091` |
+| `wr_timerfd` | `fb6077efdbd95a1519ab879c510769a08ea49d110308e3c957f53f48eb122091` |
 | `wr_exec` | `2177609ab47d81d4c1ffca758916893b39f65c52d120efed5c392239852378e6` |
 | `ksud` | `5cd19258692d87743a92078b25b40974d07e30a4f7e7dbeb10777ae039db7c7c` |
 
@@ -178,7 +178,7 @@ cp port-out/<BUILD>/profile.json assets/payload/<BUILD>/profile.json
 ```
 
 The directory name is the build id. The APK discovers every
-`assets/payload/*` directory that contains a `timer_s25fe` binary at runtime, so
+`assets/payload/*` directory that contains a `wr_timerfd` binary at runtime, so
 no Java table needs editing. `profile.json` supplies the model, SoC, Android
 version, and the `verified` flag; a directory without it is still usable but is
 treated as untested.

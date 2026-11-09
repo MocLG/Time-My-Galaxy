@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-only
-"""Extract the firmware-specific constants used by timer_s25fe.c.
+"""Extract the firmware-specific constants used by wr_timerfd.c.
 
 Pass one or more Samsung firmware files.  Any mix is accepted:
 

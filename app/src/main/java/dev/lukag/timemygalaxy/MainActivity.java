@@ -367,7 +367,7 @@ public class MainActivity extends Activity implements PayloadStore.Log {
         new AlertDialog.Builder(this)
                 .setTitle(current.verified ? "Plant the exploit?" : "Plant the UNTESTED exploit?")
                 .setMessage("Target " + current.build + " (" + current.describe() + ").\n\n"
-                        + "Runs timer_s25fe as uid 2000 (Shizuku shell).\n\n"
+                        + "Runs wr_timerfd as uid 2000 (Shizuku shell).\n\n"
                         + "- One plant per boot. If this boot already ran it, reboot first.\n"
                         + "- Takes roughly 30-60 s; keep the screen on and leave the phone alone.\n"
                         + "- On success the process parks forever and must not be killed.\n"
@@ -407,7 +407,7 @@ public class MainActivity extends Activity implements PayloadStore.Log {
                     return;
                 }
                 if (!parked.isEmpty()) {
-                    appendLog("[-] timer_s25fe already running: pid " + parked + "\n");
+                    appendLog("[-] wr_timerfd already running: pid " + parked + "\n");
                     appendLog("[i] a planted run is cleaned only by reboot\n");
                     return;
                 }
@@ -435,12 +435,12 @@ public class MainActivity extends Activity implements PayloadStore.Log {
                         + " && if command -v setsid >/dev/null 2>&1"
                         + " && setsid true 2>/dev/null; then"
                         + " echo 'launcher: setsid' >> " + quote(RUN_LOG) + ";"
-                        + " setsid ./timer_s25fe >> " + quote(RUN_LOG)
+                        + " setsid ./wr_timerfd >> " + quote(RUN_LOG)
                         + " 2>&1 < /dev/null &"
                         + " else echo 'launcher: fallback' >> " + quote(RUN_LOG) + ";"
-                        + " ./timer_s25fe >> " + quote(RUN_LOG)
+                        + " ./wr_timerfd >> " + quote(RUN_LOG)
                         + " 2>&1 < /dev/null & fi";
-                appendLog("[*] planting timer_s25fe detached from Shizuku\n");
+                appendLog("[*] planting wr_timerfd detached from Shizuku\n");
                 Process launcher = ShizukuBridge.exec(
                         new String[]{"/system/bin/sh", "-c", launch},
                         env, PayloadStore.REMOTE_DIR);
@@ -469,8 +469,8 @@ public class MainActivity extends Activity implements PayloadStore.Log {
                 }
                 if (pid.isEmpty()) {
                     appendLog(unknown
-                            ? "[-] cannot see timer_s25fe; Shizuku is unavailable\n"
-                            : "[-] timer_s25fe did not start\n");
+                            ? "[-] cannot see wr_timerfd; Shizuku is unavailable\n"
+                            : "[-] wr_timerfd did not start\n");
                     String runTail = captureShell("tail -c 4096 " + quote(RUN_LOG)
                             + " 2>/dev/null", 5000L);
                     if (!runTail.trim().isEmpty() && !runTail.startsWith("error:")) {
@@ -557,7 +557,7 @@ public class MainActivity extends Activity implements PayloadStore.Log {
                     }
                     appendLog("[i] exploit stays parked until reboot; do not kill it\n");
                 } else if (!alive) {
-                    appendLog("[-] timer_s25fe disappeared before done after "
+                    appendLog("[-] wr_timerfd disappeared before done after "
                             + elapsed + "s\n");
                     if (!logTail.trim().isEmpty() && !logTail.startsWith("error:")) {
                         appendLog("[i] helper log tail:\n" + logTail.trim() + "\n");
@@ -694,7 +694,7 @@ public class MainActivity extends Activity implements PayloadStore.Log {
      * null means Shizuku could not be reached, empty means the process is gone.
      */
     private String readPidOrNull() {
-        String out = captureShell("pidof timer_s25fe 2>/dev/null", 5000L).trim();
+        String out = captureShell("pidof wr_timerfd timer_s25fe 2>/dev/null", 5000L).trim();
         if (out.startsWith("error:")) {
             return null;
         }
