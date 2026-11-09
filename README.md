@@ -37,11 +37,27 @@ exist in exactly one place. `exploit/build.sh` rebuilds them there.
 
 ## Build
 
+Most users only need the debug APK:
+
 ```sh
 ./exploit/build.sh      # timer_s25fe + wr_exec -> assets/payload/...
-./build.sh              # debug APK
+./build.sh              # debug APK (default)
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
+
+To build a signed release APK instead, pass the `release` flag:
+
+```sh
+./build.sh release      # signed with ~/.android/release-keystore.properties
+./build.sh release /path/to/keystore.properties
+adb install -r app/build/outputs/apk/release/app-release.apk
+```
+
+Release signing reads `storeFile=`, `alias=`, and `password=` from the given
+properties file, then `$KEYSTORE_PROPS`, then
+`~/.android/release-keystore.properties`. If none exists, the build fails before
+Gradle starts. The keystore and its secrets stay outside the repository. The
+debug build does not need a key.
 
 Requires JDK 17, Android SDK platform 35, and
 `aarch64-linux-gnu-gcc` for the payload.

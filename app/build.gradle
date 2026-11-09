@@ -1,5 +1,29 @@
+import java.util.Properties
+
 plugins {
     id 'com.android.application'
+}
+
+// Release signing. build.sh passes -PkeystoreProps=<path>; direct Gradle runs
+// fall back to ~/.android/release-keystore.properties. The properties file
+// holds storeFile=, alias=, and password= and stays outside the repository.
+def keystorePropsPath = findProperty('keystoreProps')
+def keystorePropsFile = keystorePropsPath != null
+        ? new File(keystorePropsPath)
+        : new File(System.getProperty('user.home'), '.android/release-keystore.properties')
+def keystoreProps = new Properties()
+def releaseSigningReady = keystorePropsFile.isFile()
+if (releaseSigningReady) {
+    keystorePropsFile.withInputStream { keystoreProps.load(it) }
+}
+def keystorePass = keystoreProps.getProperty('storePassword',
+        keystoreProps.getProperty('password'))
+
+gradle.taskGraph.whenReady { graph ->
+    if (graph.hasTask(':app:assembleRelease') && !releaseSigningReady) {
+        throw new GradleException("release signing properties not found: "
+                + keystorePropsFile + " (use build.sh release [path])")
+    }
 }
 
 android {
@@ -14,9 +38,24 @@ android {
         versionName '1.0'
     }
 
+    signingConfigs {
+        release {
+            if (releaseSigningReady) {
+                storeFile new File(keystoreProps.getProperty('storeFile'))
+                storePassword keystorePass
+                keyAlias keystoreProps.getProperty('keyAlias',
+                        keystoreProps.getProperty('alias'))
+                keyPassword keystoreProps.getProperty('keyPassword', keystorePass)
+            }
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
+            if (releaseSigningReady) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 
