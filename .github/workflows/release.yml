@@ -1,0 +1,147 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: startsWith(github.event.head_commit.message, 'chore:')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build every payload
+        run: |
+          docker run --rm \
+            -v "$PWD:/src" \
+            -w /src \
+            archlinux:latest \
+            bash -c '
+              set -euo pipefail
+              pacman -Syu --noconfirm --needed --quiet \
+                aarch64-linux-gnu-gcc python >/dev/null
+              shopt -s nullglob
+              profiles=(assets/payload/*/profile.json)
+              if [ ${#profiles[@]} -eq 0 ]; then
+                echo "no payload profiles found" >&2
+                exit 1
+              fi
+              for profile in "${profiles[@]}"; do
+                build=$(basename "$(dirname "$profile")")
+                echo "== $build =="
+                PROFILE="$profile" BUILD="$build" ./exploit/build.sh
+              done
+            '
+          sudo chown -R "$(id -u):$(id -g)" assets/payload
+
+      - name: Verify rebuilt payloads
+        run: |
+          set -euo pipefail
+          status=0
+          for dir in assets/payload/*/; do
+            build=$(basename "$dir")
+            for file in wr_timerfd wr_exec ksud; do
+              path="assets/payload/$build/$file"
+              built=$(sha256sum "$path" | cut -d' ' -f1)
+              committed=$(git show "HEAD:$path" | sha256sum | cut -d' ' -f1)
+              if [ "$built" != "$committed" ]; then
+                echo "::error file=$path::rebuilt $built, committed $committed"
+                status=1
+              else
+                echo "$path $built"
+              fi
+            done
+          done
+          exit "$status"
+
+      - name: Read version
+        id: version
+        run: |
+          version=$(sed -nE "s/^[[:space:]]*versionName '([^']+)'.*/\1/p" app/build.gradle)
+          code=$(sed -nE "s/^[[:space:]]*versionCode ([0-9]+).*/\1/p" app/build.gradle)
+          if [ -z "$version" ]; then
+            echo "::error::versionName not found in app/build.gradle"
+            exit 1
+          fi
+          echo "name=$version" >> "$GITHUB_OUTPUT"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+
+      - name: Check tag does not exist
+        run: |
+          tag="${{ steps.version.outputs.tag }}"
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "::error::tag $tag already exists, bump versionName in app/build.gradle"
+            exit 1
+          fi
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-35 build-tools;35.0.0'
+
+      - name: Configure signing
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$HOME/.android"
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$HOME/.android/release.keystore"
+          chmod 600 "$HOME/.android/release.keystore"
+          key_pass="${KEY_PASSWORD:-$KEYSTORE_PASSWORD}"
+          printf 'storeFile=%s\nalias=%s\npassword=%s\nkeyPassword=%s\n' \
+            "$HOME/.android/release.keystore" "$KEY_ALIAS" \
+            "$KEYSTORE_PASSWORD" "$key_pass" \
+            > "$HOME/.android/release-keystore.properties"
+          chmod 600 "$HOME/.android/release-keystore.properties"
+
+      - name: Build release APK
+        run: ./build.sh release
+
+      - name: Prepare release asset
+        run: |
+          set -euo pipefail
+          asset="Time-My-Galaxy-${{ steps.version.outputs.name }}.apk"
+          cp app/build/outputs/apk/release/app-release.apk "$asset"
+          sha256sum "$asset" > apk.sha256
+          cat apk.sha256
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Time-My-Galaxy ${{ steps.version.outputs.name }}
+          generate_release_notes: true
+          files: |
+            Time-My-Galaxy-${{ steps.version.outputs.name }}.apk
+            apk.sha256
+
+      - name: Summary
+        run: |
+          {
+            echo "### Time-My-Galaxy ${{ steps.version.outputs.name }}"
+            echo
+            echo "Tag: \`${{ steps.version.outputs.tag }}\`"
+            echo
+            echo '```'
+            cat apk.sha256
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
