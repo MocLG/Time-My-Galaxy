@@ -26,6 +26,8 @@ Time-My-Galaxy/
 │       ├── wroot_stage.c     pipe -> workqueue UMH stage
 │       └── wr_exec.c         exec shim
 ├── tools/adb_run.sh          manual ADB fallback for development
+├── tools/port_firmware.py    firmware -> offsets/port profile extractor
+├── tools/port_firmware.sh    dependency-checking wrapper for the extractor
 ├── build.sh                  APK build wrapper
 └── README.md
 ```
@@ -109,6 +111,59 @@ Mitigations in place:
 - **Stop (unsafe)** kills the detached process by pid, requires explicit
   confirmation, and warns that reboot is the only safe cleanup.
 - One plant per boot. If a run failed, reboot before trying again.
+
+## Porting to another device
+
+`tools/port_firmware.py` extracts the firmware-specific constants from a
+Samsung firmware. It accepts a `.tar.md5` (AP, BL, CSC, ...), a `boot.img`, a
+`boot.img.lz4`, or a raw ARM64 kernel `Image`, and multiple arguments can be
+chained in any order:
+
+```sh
+tools/port_firmware.sh ~/s25-firmware/AP_S731BXXU9CZIF_*.tar.md5
+tools/port_firmware.sh --build S731BXXU9CZIF boot.img.lz4
+tools/port_firmware.sh AP_*.tar.md5 BL_*.tar.md5 boot.img.lz4
+```
+
+The AP tar is the useful one: it contains `boot.img.lz4`. BL tars contain only
+bootloader images and are skipped automatically, so passing them is harmless.
+The build id is read from the AP/BL/CSC filename; a standalone image needs
+`--build`.
+
+Requirements: `python3`, `nm` (binutils), `vmlinux-to-elf` (`pipx install
+vmlinux-to-elf`), and `lz4`/`zstd` if the kernel is compressed.
+
+The tool writes `port-out/<BUILD>/`:
+
+```
+offsets.h          drop-in replacement for the #define block
+profile.json       machine-readable values and derivation notes
+report.txt         human-readable summary and warnings
+target.java.txt    ready-to-paste Targets.Target entry
+System.map         reconstructed kernel symbol table
+kernel-config.txt  embedded IKCONFIG
+work/              boot.img, Image, vmlinux.elf, vmlinux-to-elf log
+```
+
+It reconstructs symbols with `vmlinux-to-elf`, reads BTF for struct sizes and
+member offsets, reads IKCONFIG for the VA layout, and finds the allocation
+return addresses by decoding the `bl` instructions in `do_timer_create`,
+`prepare_ro_creds`, and `dup_task_struct`. Generated values are numerically
+identical to the verified `S731BXXU9CZIF` constants.
+
+To build a port:
+
+```sh
+mkdir -p assets/payload/<BUILD>
+cp assets/payload/S731BXXU9CZIF/{wr_exec,ksud} assets/payload/<BUILD>/
+PROFILE=port-out/<BUILD>/offsets.h BUILD=<BUILD> ./exploit/build.sh
+```
+
+Then add the `target.java.txt` entry, set `verified=true` only after the chain
+completes on the hardware, and build the APK. `MEMSTART_PAGE` is board runtime
+data and is not derivable from the firmware; the tool defaults to `0x80000`
+(the verified S731B value). Use `--memstart-page` if the target board reports
+a different `memstart_addr`. `port-out/` is gitignored.
 
 ## Warning
 

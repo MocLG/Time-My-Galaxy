@@ -12,3 +12,6 @@
 *.aab
 
 /wr-last*.log
+/port-out/
+__pycache__/
+*.pyc
