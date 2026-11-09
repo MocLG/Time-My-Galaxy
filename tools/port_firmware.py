@@ -808,7 +808,7 @@ def derive(elf: Elf, symbols: dict[str, tuple[int, str]], funcs: list[tuple[int,
         "KDP_ENABLE_STATIC": "kdp_enable",
     }
     for macro, symbol in absolute.items():
-        addr = sym(symbol, required=(macro != "KDP_ENABLE_STATIC"))
+        addr = sym(symbol)
         if addr is not None:
             add(macro, addr, symbol)
 
