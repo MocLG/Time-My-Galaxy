@@ -137,9 +137,9 @@ The tool writes `port-out/<BUILD>/`:
 
 ```
 offsets.h          drop-in replacement for the #define block
-profile.json       machine-readable values and derivation notes
+profile.json       build metadata plus machine-readable values
 report.txt         human-readable summary and warnings
-target.java.txt    ready-to-paste Targets.Target entry
+target.java.txt    legacy reference entry (the app discovers assets itself)
 System.map         reconstructed kernel symbol table
 kernel-config.txt  embedded IKCONFIG
 work/              boot.img, Image, vmlinux.elf, vmlinux-to-elf log
@@ -151,16 +151,29 @@ return addresses by decoding the `bl` instructions in `do_timer_create`,
 `prepare_ro_creds`, and `dup_task_struct`. Generated values are numerically
 identical to the verified `S731BXXU9CZIF` constants.
 
-To build a port:
+To build a port, drop the binaries and metadata under
+`assets/payload/<BUILD>/`:
 
 ```sh
 mkdir -p assets/payload/<BUILD>
 cp assets/payload/S731BXXU9CZIF/{wr_exec,ksud} assets/payload/<BUILD>/
 PROFILE=port-out/<BUILD>/offsets.h BUILD=<BUILD> ./exploit/build.sh
+cp port-out/<BUILD>/profile.json assets/payload/<BUILD>/profile.json
 ```
 
-Then add the `target.java.txt` entry, set `verified=true` only after the chain
-completes on the hardware, and build the APK. `MEMSTART_PAGE` is board runtime
+The directory name is the build id. The APK discovers every
+`assets/payload/*` directory that contains a `timer_s25fe` binary at runtime, so
+no Java table needs editing. `profile.json` supplies the model, SoC, Android
+version, and the `verified` flag; a directory without it is still usable but is
+treated as untested.
+
+On start the app compares `Build.FINGERPRINT`, `VERSION.INCREMENTAL`, `DISPLAY`,
+and `ID` against the bundled build ids and selects the match (the longest build
+id wins). If the matched payload is not marked verified, **Stage payloads** and
+**Plant exploit** show a warning and require explicit confirmation. Only set
+`"verified": true` after the chain completes on the hardware.
+
+`MEMSTART_PAGE` is board runtime
 data and is not derivable from the firmware; the tool defaults to `0x80000`
 (the verified S731B value). Use `--memstart-page` if the target board reports
 a different `memstart_addr`. `port-out/` is gitignored.

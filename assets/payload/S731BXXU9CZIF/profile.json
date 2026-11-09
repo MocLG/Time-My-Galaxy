@@ -1,0 +1,12 @@
+{
+  "build": "S731BXXU9CZIF",
+  "model": "SM-S731B",
+  "soc": "Exynos 2400",
+  "android": "17",
+  "verified": true,
+  "payload": {
+    "timer_s25fe": "fb6077efdbd95a1519ab879c510769a08ea49d110308e3c957f53f48eb122091",
+    "wr_exec": "2177609ab47d81d4c1ffca758916893b39f65c52d120efed5c392239852378e6",
+    "ksud": "5cd19258692d87743a92078b25b40974d07e30a4f7e7dbeb10777ae039db7c7c"
+  }
+}

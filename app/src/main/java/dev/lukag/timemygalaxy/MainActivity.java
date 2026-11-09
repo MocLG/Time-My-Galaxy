@@ -29,6 +29,7 @@ import android.widget.TextView;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -101,7 +102,7 @@ public class MainActivity extends Activity implements PayloadStore.Log {
         super.onCreate(savedInstanceState);
         setContentView(buildUi());
 
-        gateResult = DeviceGate.check();
+        gateResult = DeviceGate.check(getAssets());
         target = gateResult.target;
         gateView.setText(gateResult.detail);
         appendLog("Time-My-Galaxy\n");
@@ -116,8 +117,10 @@ public class MainActivity extends Activity implements PayloadStore.Log {
             ui.post(this::showUnsupportedDialog);
         }
         executor.execute(() -> {
-            boolean staged = ShizukuBridge.isRunning() && ShizukuBridge.isGranted()
-                    && PayloadStore.isStaged(getAssets());
+            Targets.Target current = target;
+            boolean staged = current != null && ShizukuBridge.isRunning()
+                    && ShizukuBridge.isGranted()
+                    && PayloadStore.isStaged(getAssets(), current.build);
             ui.post(() -> appendLog(staged
                     ? "[+] payloads already staged in " + PayloadStore.REMOTE_DIR + "\n"
                     : "[*] payloads not staged yet\n"));
@@ -311,11 +314,34 @@ public class MainActivity extends Activity implements PayloadStore.Log {
         if (busy.get()) {
             return;
         }
+        Targets.Target current = target;
+        if (current == null) {
+            showUnsupportedDialog();
+            return;
+        }
+        if (!current.verified) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Untested payload")
+                    .setMessage("Payload " + current.build + " is not verified on this "
+                            + "firmware.\n\n"
+                            + "Staging copies it into " + PayloadStore.REMOTE_DIR
+                            + " and may not match the running kernel. Continue only if "
+                            + "you built it for this exact build.")
+                    .setNegativeButton("Cancel", null)
+                    .setPositiveButton("Stage anyway", (d, w) -> stageNow(current))
+                    .show();
+            return;
+        }
+        stageNow(current);
+    }
+
+    private void stageNow(Targets.Target current) {
         executor.execute(() -> {
             setBusy(true);
             try {
-                appendLog("[*] staging payloads into " + PayloadStore.REMOTE_DIR + "\n");
-                PayloadStore.stageAll(getAssets(), this);
+                appendLog("[*] staging payload " + current.build + " into "
+                        + PayloadStore.REMOTE_DIR + "\n");
+                PayloadStore.stageAll(getAssets(), current.build, this);
                 appendLog("[+] staging complete\n");
             } catch (Throwable t) {
                 appendLog("[-] staging failed: " + t.getMessage() + "\n");
@@ -326,7 +352,7 @@ public class MainActivity extends Activity implements PayloadStore.Log {
     }
 
     private void confirmRun() {
-        gateResult = DeviceGate.check();
+        gateResult = DeviceGate.check(getAssets());
         target = gateResult.target;
         gateView.setText(gateResult.detail);
         refreshStatus();
@@ -334,16 +360,22 @@ public class MainActivity extends Activity implements PayloadStore.Log {
             showUnsupportedDialog();
             return;
         }
+        final Targets.Target current = target;
+        String untested = current.verified ? "" : "\n\n"
+                + "WARNING: payload " + current.build + " is NOT verified on this "
+                + "firmware. An untested build can panic the kernel.";
         new AlertDialog.Builder(this)
-                .setTitle("Plant the exploit?")
-                .setMessage("Runs timer_s25fe as uid 2000 (Shizuku shell).\n\n"
+                .setTitle(current.verified ? "Plant the exploit?" : "Plant the UNTESTED exploit?")
+                .setMessage("Target " + current.build + " (" + current.describe() + ").\n\n"
+                        + "Runs timer_s25fe as uid 2000 (Shizuku shell).\n\n"
                         + "- One plant per boot. If this boot already ran it, reboot first.\n"
                         + "- Takes roughly 30-60 s; keep the screen on and leave the phone alone.\n"
                         + "- On success the process parks forever and must not be killed.\n"
                         + "- A failed plant also needs a reboot, and either can panic the kernel.\n\n"
-                        + "Run only on a device you own.")
+                        + "Run only on a device you own." + untested)
                 .setNegativeButton("Cancel", null)
-                .setPositiveButton("Run", (d, w) -> executeExploit())
+                .setPositiveButton(current.verified ? "Run" : "Run anyway", (d, w) ->
+                        executeExploit())
                 .show();
     }
 
@@ -359,9 +391,14 @@ public class MainActivity extends Activity implements PayloadStore.Log {
             setBusy(true);
             Process tail = null;
             try {
-                if (!PayloadStore.isStaged(getAssets())) {
-                    appendLog("[*] payloads missing, staging first\n");
-                    PayloadStore.stageAll(getAssets(), this);
+                Targets.Target current = target;
+                if (current == null) {
+                    appendLog("[-] no payload for this firmware\n");
+                    return;
+                }
+                if (!PayloadStore.isStaged(getAssets(), current.build)) {
+                    appendLog("[*] payload " + current.build + " missing, staging first\n");
+                    PayloadStore.stageAll(getAssets(), current.build, this);
                 }
 
                 String parked = readPidOrNull();
@@ -753,24 +790,27 @@ public class MainActivity extends Activity implements PayloadStore.Log {
     }
 
     private void showUnsupportedDialog() {
+        StringBuilder message = new StringBuilder();
+        if (gateResult != null) {
+            message.append(gateResult.detail).append("\n\n");
+        }
+        List<Targets.Target> all = Targets.all(getAssets());
+        if (all.isEmpty()) {
+            message.append("No payloads are bundled in this APK.");
+        } else {
+            message.append("Available payloads:\n");
+            for (Targets.Target item : all) {
+                message.append("- ").append(item.label())
+                        .append(" (").append(item.describe()).append(")\n");
+            }
+            message.append("\nThis firmware does not match any bundled build. "
+                    + "Do not run the exploit here.");
+        }
         new AlertDialog.Builder(this)
                 .setTitle("Firmware not supported")
-                .setMessage((gateResult == null ? "" : gateResult.detail + "\n\n")
-                        + "This app only ships a payload for " + targetLabel()
-                        + ".\n\nDo not run it on another build.")
+                .setMessage(message.toString())
                 .setPositiveButton("OK", null)
                 .show();
-    }
-
-    private String targetLabel() {
-        StringBuilder out = new StringBuilder();
-        for (Targets.Target item : Targets.all()) {
-            if (out.length() > 0) {
-                out.append(", ");
-            }
-            out.append(item.label());
-        }
-        return out.toString();
     }
 
     @Override

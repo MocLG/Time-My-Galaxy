@@ -1,9 +1,10 @@
 package dev.lukag.timemygalaxy;
 
+import android.content.res.AssetManager;
 import android.os.Build;
 
 /**
- * Matches the running firmware against the payload table.
+ * Matches the running firmware against the payloads bundled in the APK.
  *
  * /proc/version is not readable by app UIDs, so use Build.FINGERPRINT and
  * Build.VERSION.INCREMENTAL, which carry the Samsung PDA string.
@@ -36,7 +37,7 @@ final class DeviceGate {
     private DeviceGate() {
     }
 
-    static Result check() {
+    static Result check(AssetManager assets) {
         String model = safe(Build.MODEL);
         String fingerprint = safe(Build.FINGERPRINT);
         String incremental = safe(Build.VERSION.INCREMENTAL);
@@ -44,25 +45,28 @@ final class DeviceGate {
         String id = safe(Build.ID);
         String kernel = System.getProperty("os.version", "unknown");
 
-        Targets.Target target = Targets.detect(model, fingerprint, incremental, display, id);
+        Targets.Target target = Targets.detect(assets, fingerprint, incremental, display, id);
 
         StringBuilder detail = new StringBuilder();
         detail.append("[+] model ").append(model).append('\n');
         if (target == null) {
-            detail.append("[-] firmware not in payload table\n");
+            detail.append("[-] no payload matches this firmware\n");
             detail.append("    fingerprint ").append(fingerprint).append('\n');
             detail.append("    incremental ").append(incremental).append('\n');
+            detail.append("[i] available payloads: ").append(Targets.available(assets));
         } else {
             detail.append(target.verified ? "[+] firmware " : "[!] firmware ")
                     .append(target.build).append(target.verified
                             ? " (verified)" : " (untested)")
                     .append('\n');
+            detail.append("[i] payload ").append(target.build).append(", ")
+                    .append(target.describe()).append('\n');
             if (!model.equalsIgnoreCase(target.model)) {
                 detail.append("[!] model does not match table (expected ")
                         .append(target.model).append(")\n");
             }
+            detail.append("[i] kernel ").append(kernel);
         }
-        detail.append("[i] kernel ").append(kernel);
         return new Result(target, model, fingerprint, incremental, kernel, detail.toString());
     }
 

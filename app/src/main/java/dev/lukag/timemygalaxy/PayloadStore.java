@@ -5,12 +5,14 @@ import android.content.res.AssetManager;
 import java.io.IOException;
 import java.io.InputStream;
 import java.security.MessageDigest;
-import java.util.LinkedHashMap;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
-import java.util.Map;
+import java.util.Set;
 
 /**
- * Stages the exploit payload into /data/local/tmp/wr through Shizuku.
+ * Stages one build's exploit payload into /data/local/tmp/wr through Shizuku.
  * Everything runs as uid 2000; the app sandbox never executes anything.
  */
 final class PayloadStore {
@@ -21,13 +23,7 @@ final class PayloadStore {
 
     static final String REMOTE_DIR = "/data/local/tmp/wr";
 
-    private static final Map<String, String> FILES = new LinkedHashMap<>();
-
-    static {
-        FILES.put("timer_s25fe", "payload/S731BXXU9CZIF/timer_s25fe");
-        FILES.put("wr_exec", "payload/S731BXXU9CZIF/wr_exec");
-        FILES.put("ksud", "payload/S731BXXU9CZIF/ksud");
-    }
+    private static final String[] FILES = {"timer_s25fe", "wr_exec", "ksud"};
 
     private PayloadStore() {
     }
@@ -36,11 +32,15 @@ final class PayloadStore {
         return REMOTE_DIR + "/" + name;
     }
 
-    static boolean isStaged(AssetManager assets) {
+    static boolean isStaged(AssetManager assets, String build) {
+        if (!usableBuild(build)) {
+            return false;
+        }
         try {
-            for (Map.Entry<String, String> entry : FILES.entrySet()) {
-                String remote = remotePath(entry.getKey());
-                if (!digest(assets, entry.getValue()).equalsIgnoreCase(remoteDigest(remote))) {
+            for (String name : FILES) {
+                String asset = assetPath(build, name);
+                String remote = remotePath(name);
+                if (!digest(assets, asset).equalsIgnoreCase(remoteDigest(remote))) {
                     return false;
                 }
             }
@@ -50,11 +50,20 @@ final class PayloadStore {
         }
     }
 
-    static void stageAll(AssetManager assets, Log log) throws Exception {
+    static void stageAll(AssetManager assets, String build, Log log) throws Exception {
+        if (!usableBuild(build)) {
+            throw new IOException("bad payload build id: " + build);
+        }
         ensureRemoteDir();
-        for (Map.Entry<String, String> entry : FILES.entrySet()) {
-            String name = entry.getKey();
-            String asset = entry.getValue();
+
+        List<String> missing = missing(assets, build);
+        if (!missing.isEmpty()) {
+            throw new IOException("payload " + build + " is incomplete: missing "
+                    + String.join(", ", missing));
+        }
+
+        for (String name : FILES) {
+            String asset = assetPath(build, name);
             String remote = remotePath(name);
             String localDigest = digest(assets, asset);
             log.line("[*] staging " + remote + " (" + readableSize(assets, asset) + ")");
@@ -68,6 +77,36 @@ final class PayloadStore {
             }
             log.line("[+] " + remote + " sha256=" + localDigest);
         }
+    }
+
+    static String assetPath(String build, String name) {
+        return "payload/" + build + "/" + name;
+    }
+
+    private static List<String> missing(AssetManager assets, String build) {
+        List<String> missing = new ArrayList<>();
+        Set<String> present = new HashSet<>();
+        try {
+            String[] files = assets.list("payload/" + build);
+            if (files != null) {
+                for (String file : files) {
+                    present.add(file);
+                }
+            }
+        } catch (IOException ignored) {
+        }
+        for (String name : FILES) {
+            if (!present.contains(name)) {
+                missing.add(name);
+            }
+        }
+        return missing;
+    }
+
+    private static boolean usableBuild(String build) {
+        return build != null && !build.isEmpty()
+                && !".".equals(build) && !"..".equals(build)
+                && build.matches("[A-Za-z0-9._-]+");
     }
 
     private static void ensureRemoteDir() throws Exception {
