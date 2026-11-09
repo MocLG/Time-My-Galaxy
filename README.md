@@ -1,7 +1,8 @@
 # Time-My-Galaxy
 
-CVE-2026-98260 timerfd exploit and Shizuku launcher for the Samsung
-SM-S731B (S25 FE), firmware `S731BXXU9CZIF` / Android 17.
+CVE-2026-98260 timerfd exploit and Shizuku launcher for Samsung devices.
+Payloads are selected per firmware build, keyed by the Samsung PDA string
+from `ro.build.version.incremental`.
 
 The exploit runs as the Android shell user (uid 2000) through Shizuku and
 loads KernelSU with `me.weishu.kernelsu`. The app never executes a payload
@@ -13,10 +14,7 @@ inside its own sandbox.
 Time-My-Galaxy/
 ├── app/                      Android app (Java sources, manifest, icon)
 ├── assets/payload/
-│   └── S731BXXU9CZIF/        binaries packaged into the APK
-│       ├── wr_timerfd       exploit
-│       ├── wr_exec           libc-free UMH exec shim
-│       └── ksud              KernelSU late-load helper
+│   └── S731BXXU9CZIF/        supported build: SM-S731B (S25 FE)
 ├── exploit/
 │   ├── build.sh              cross-compiles into assets/payload/
 │   └── src/
@@ -33,7 +31,9 @@ Time-My-Galaxy/
 ```
 
 `app/build.gradle` merges `../assets` into the APK asset tree, so the binaries
-exist in exactly one place. `exploit/build.sh` rebuilds them there.
+exist in exactly one place. `exploit/build.sh` rebuilds them there. Each
+`assets/payload/<BUILD>/` directory is one supported firmware build. The
+directory name is the build id.
 
 ## Build
 
@@ -62,14 +62,6 @@ debug build does not need a key.
 Requires JDK 17, Android SDK platform 35, and
 `aarch64-linux-gnu-gcc` for the payload.
 
-Verified payload hashes:
-
-| file | sha256 |
-|---|---|
-| `wr_timerfd` | `21e528e743cee0d489516483d8f7c8c901723717166e0e405928996313a58fb7` |
-| `wr_exec` | `2177609ab47d81d4c1ffca758916893b39f65c52d120efed5c392239852378e6` |
-| `ksud` | `5cd19258692d87743a92078b25b40974d07e30a4f7e7dbeb10777ae039db7c7c` |
-
 ## Use
 
 1. Start Shizuku as the shell user.
@@ -84,49 +76,19 @@ The helper stages `ksud` to `/data/local/tmp/.ksud-stage`, bind-mounts it over
 
 ## Process lifetime and kill risk
 
-The exploit is launched by the Shizuku shell, but it is detached from it:
+The exploit runs detached from Shizuku: `setsid`, ignored `SIGHUP`/`SIGPIPE`,
+`/dev/null` stdin, and file-backed stdout/stderr. Restarting Shizuku, closing
+the app, or force-stopping it does not kill the process. The app only polls
+`pidof` and the logs.
 
-- `trap '' 1 13` makes `SIGHUP`/`SIGPIPE` ignored.
-- `setsid` puts it in a new session and process group, so signals aimed at
-  Shizuku's process group do not reach it.
-- stdin is `/dev/null`; stdout/stderr go to
-  `/data/local/tmp/wr/run.log`, not to a Shizuku pipe.
-- The shell that starts it exits, so it is reparented away from
-  `shizuku_server`.
-- The app supervises it by polling `pidof` and the two log files, not by
-  holding a Shizuku process handle.
+It is still killable by `SIGKILL`, root, LMKD under memory pressure, a uid or
+cgroup kill, or reboot. Exit would free kernel objects that are still
+referenced, so it parks. Killing a parked process can panic the kernel.
 
-A Shizuku restart therefore loses only the live log tailer and the app's
-visibility. The exploit keeps running; closing the activity, swiping the app
-away, or force-stopping the app does not kill it either. The app never calls
-`destroy()` on the exploit, and `onDestroy()` only stops the log tailer.
-
-It is still not unkillable:
-
-- The kernel can still deliver `SIGKILL`; no userspace process can block it.
-- Root or another shell process can `kill -9` it.
-- LMKD can select it under memory pressure.
-- A global kill of uid 2000, a kill of its cgroup, or a reboot ends it. The
-  new session protects against process-group signals, not against those.
-
-The exploit parks because exiting would free kernel objects that are still
-referenced. Killing a parked process can therefore panic the kernel. There is
-no safe way to hand those references back from userspace.
-
-Mitigations in place:
-
-- After `done`, the app uses the newly loaded KernelSU `su` to set the parked
-  process's `oom_score_adj` to `-1000`, which keeps LMKD from choosing it.
-  That value is not a shield against `SIGKILL`, root, or reboot.
-- The app logs the inherited `oom_score_adj` at launch. During the 30-60 s
-  race, before KernelSU exists, the process is still subject to LMKD, so keep
-  the phone idle and avoid launching heavy apps.
-- If Shizuku goes away during the run, the app says supervision is paused
-  rather than treating the exploit as dead. It resumes polling if Shizuku
-  comes back.
-- **Stop (unsafe)** kills the detached process by pid, requires explicit
-  confirmation, and warns that reboot is the only safe cleanup.
-- One plant per boot. If a run failed, reboot before trying again.
+After `done`, the app sets the parked process's `oom_score_adj` to `-1000` to
+keep LMKD away. Until KernelSU loads, keep the phone idle. **Stop (unsafe)**
+requires confirmation and warns that reboot is the only safe cleanup. One plant
+per boot. Reboot before retrying.
 
 ## Porting to another device
 
@@ -143,8 +105,9 @@ tools/port_firmware.sh AP_*.tar.md5 BL_*.tar.md5 boot.img.lz4
 
 The AP tar is the useful one: it contains `boot.img.lz4`. BL tars contain only
 bootloader images and are skipped automatically, so passing them is harmless.
-The build id is read from the AP/BL/CSC filename; a standalone image needs
-`--build`.
+The build id is read from the AP/BL/CSC filename. A standalone image needs
+`--build`. On a Samsung device, get `<BUILD>` with
+`adb shell getprop ro.build.version.incremental` (the PDA string).
 
 Requirements: `python3`, `nm` (binutils), `vmlinux-to-elf` (`pipx install
 vmlinux-to-elf`), and `lz4`/`zstd` if the kernel is compressed.
@@ -164,23 +127,27 @@ work/              boot.img, Image, vmlinux.elf, vmlinux-to-elf log
 It reconstructs symbols with `vmlinux-to-elf`, reads BTF for struct sizes and
 member offsets, reads IKCONFIG for the VA layout, and finds the allocation
 return addresses by decoding the `bl` instructions in `do_timer_create`,
-`prepare_ro_creds`, and `dup_task_struct`. Generated values are numerically
-identical to the verified `S731BXXU9CZIF` constants.
+`prepare_ro_creds`, and `dup_task_struct`. Generated values for the reference
+build are numerically identical to the verified `S731BXXU9CZIF` constants.
 
-To build a port, drop the binaries and metadata under
-`assets/payload/<BUILD>/`:
+To build a port, create the build directory and compile the exploit:
 
 ```sh
 mkdir -p assets/payload/<BUILD>
-cp assets/payload/S731BXXU9CZIF/{wr_exec,ksud} assets/payload/<BUILD>/
+cp assets/payload/S731BXXU9CZIF/wr_exec assets/payload/<BUILD>/
 PROFILE=port-out/<BUILD>/offsets.h BUILD=<BUILD> ./exploit/build.sh
 cp port-out/<BUILD>/profile.json assets/payload/<BUILD>/profile.json
 ```
 
+Each build directory also needs a `ksud` late-load helper at
+`assets/payload/<BUILD>/ksud`. The bundled S731B `ksud` may work on other
+builds. If late-load fails, use a `ksud` built for the target device, kernel,
+and KMI.
+
 The directory name is the build id. The APK discovers every
 `assets/payload/*` directory that contains a `wr_timerfd` binary at runtime, so
 no Java table needs editing. `profile.json` supplies the model, SoC, Android
-version, and the `verified` flag; a directory without it is still usable but is
+version, and the `verified` flag. A directory without it is still usable but is
 treated as untested.
 
 On start the app compares `Build.FINGERPRINT`, `VERSION.INCREMENTAL`, `DISPLAY`,
@@ -190,9 +157,9 @@ id wins). If the matched payload is not marked verified, **Stage payloads** and
 `"verified": true` after the chain completes on the hardware.
 
 `MEMSTART_PAGE` is board runtime
-data and is not derivable from the firmware; the tool defaults to `0x80000`
-(the verified S731B value). Use `--memstart-page` if the target board reports
-a different `memstart_addr`. `port-out/` is gitignored.
+data and is not derivable from the firmware. The tool defaults to `0x80000`
+(the reference value used by the verified build). Use `--memstart-page` if the
+target board reports a different `memstart_addr`. `port-out/` is gitignored.
 
 ## Warning
 
