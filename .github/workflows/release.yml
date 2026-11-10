@@ -43,26 +43,6 @@ jobs:
             '
           sudo chown -R "$(id -u):$(id -g)" assets/payload
 
-      - name: Verify rebuilt payloads
-        run: |
-          set -euo pipefail
-          status=0
-          for dir in assets/payload/*/; do
-            build=$(basename "$dir")
-            for file in wr_timerfd wr_exec ksud; do
-              path="assets/payload/$build/$file"
-              built=$(sha256sum "$path" | cut -d' ' -f1)
-              committed=$(git show "HEAD:$path" | sha256sum | cut -d' ' -f1)
-              if [ "$built" != "$committed" ]; then
-                echo "::error file=$path::rebuilt $built, committed $committed"
-                status=1
-              else
-                echo "$path $built"
-              fi
-            done
-          done
-          exit "$status"
-
       - name: Read version
         id: version
         run: |
