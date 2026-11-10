@@ -69,6 +69,7 @@ Requires JDK 17, Android SDK platform 35, and
 |---|---|
 | SM-S731B (S25 FE) | `S731BXXU9CZIF` |
 | SM-S731B (S25 FE) | `S731BXXS9CZJ2` |
+| SM-S731B (S25 FE) | `S731BXXUACZJC` |
 
 Each `profile.json` is the porter output copied unchanged from
 `port-out/<BUILD>/profile.json`. The app trusts only that schema. The porter
