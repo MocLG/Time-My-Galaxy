@@ -65,10 +65,10 @@ Requires JDK 17, Android SDK platform 35, and
 
 ## Payloads
 
-| Device | Firmware | `wr_timerfd` sha256 |
-|---|---|---|
-| SM-S731B (S25 FE) | `S731BXXU9CZIF` | `21e528e743cee0d489516483d8f7c8c901723717166e0e405928996313a58fb7` |
-| SM-S731B (S25 FE) | `S731BXXS9CZJ2` | `54e43e9ab2e122dde299f4982c6e63dc086cb6a4dd3d893f9bde5ce89110bbc0` |
+| Device | Firmware |
+|---|---|
+| SM-S731B (S25 FE) | `S731BXXU9CZIF` |
+| SM-S731B (S25 FE) | `S731BXXS9CZJ2` |
 
 Each `profile.json` is the porter output copied unchanged from
 `port-out/<BUILD>/profile.json`. The app trusts only that schema. The porter
