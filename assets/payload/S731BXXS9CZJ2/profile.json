@@ -3146,7 +3146,7 @@
     "TIMER_SITE_LOW16": "0x4fe0",
     "VMEMMAP_BASE": "0xfffffffe00000000"
   },
-  "verified": false,
+  "verified": true,
   "warnings": [
     "MEMSTART_PAGE is board runtime data; using 0x80000 (change with --memstart-page if needed)"
   ]
