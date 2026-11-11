@@ -168,8 +168,8 @@ fails, replace it with a `ksud` built for the target device, kernel, and KMI.
 The directory name is the build id. The app reads `VERSION.INCREMENTAL` and
 falls back to `DISPLAY`, `FINGERPRINT`, and `ID`, so no Java table needs
 editing. `profile.json` must be the porter-generated file, copied unchanged
-from `port-out/<BUILD>/profile.json`. A build without it is still usable but
-is treated as untested.
+from `port-out/<BUILD>/profile.json`. A build without it is not published, so
+the app cannot fetch it.
 
 `MEMSTART_PAGE` is board runtime
 data and is not derivable from the firmware. The tool defaults to `0x80000`

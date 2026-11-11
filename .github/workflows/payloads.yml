@@ -1,0 +1,109 @@
+name: Payloads
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: payloads
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' &&
+       startsWith(github.event.head_commit.message, 'payloads:'))
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Build every payload
+        run: |
+          docker run --rm \
+            -v "$PWD:/src" \
+            -w /src \
+            archlinux:latest \
+            bash -c '
+              set -euo pipefail
+              pacman -Syu --noconfirm --needed --quiet \
+                aarch64-linux-gnu-gcc python >/dev/null
+              shopt -s nullglob
+              profiles=(payloads/*/profile.json)
+              if [ ${#profiles[@]} -eq 0 ]; then
+                echo "no payload profiles found" >&2
+                exit 1
+              fi
+              for profile in "${profiles[@]}"; do
+                build=$(basename "$(dirname "$profile")")
+                echo "== $build =="
+                PROFILE="$profile" BUILD="$build" ./exploit/build.sh
+              done
+            '
+          sudo chown -R "$(id -u):$(id -g)" build/payload
+
+      - name: Export signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          key_pass="${KEY_PASSWORD:-$KEYSTORE_PASSWORD}"
+          install -d -m 700 "$RUNNER_TEMP/signing"
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d \
+            > "$RUNNER_TEMP/signing/release.keystore"
+          chmod 600 "$RUNNER_TEMP/signing/release.keystore"
+          keytool -importkeystore -noprompt \
+            -srckeystore "$RUNNER_TEMP/signing/release.keystore" \
+            -srcstorepass "$KEYSTORE_PASSWORD" \
+            -srcalias "$KEY_ALIAS" -srckeypass "$key_pass" \
+            -destkeystore "$RUNNER_TEMP/signing/release.p12" \
+            -deststoretype PKCS12 -deststorepass "$KEYSTORE_PASSWORD" \
+            -destalias "$KEY_ALIAS" -destkeypass "$KEYSTORE_PASSWORD"
+          openssl pkcs12 -in "$RUNNER_TEMP/signing/release.p12" \
+            -nocerts -nodes -passin "pass:$KEYSTORE_PASSWORD" \
+            -out "$RUNNER_TEMP/signing/payload.pem"
+          chmod 600 "$RUNNER_TEMP/signing/payload.pem"
+
+      - name: Pack and sign
+        run: |
+          python3 tools/pack_payloads.py \
+            --out build/payloads \
+            --key "$RUNNER_TEMP/signing/payload.pem" \
+            --rev "$(git rev-list --count HEAD)"
+
+      - name: Publish rolling release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag=payloads
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --prerelease --title "Payloads" \
+              --notes "Signed per-build payload bundles for Time-My-Galaxy."
+          fi
+          gh release upload "$tag" build/payloads/* --clobber
+          gh release view "$tag" --json assets --jq '.assets[].name' \
+            > "$RUNNER_TEMP/assets.txt"
+          while read -r name; do
+            if [ -n "$name" ] && [ ! -f "build/payloads/$name" ]; then
+              gh release delete-asset "$tag" "$name" -y
+            fi
+          done < "$RUNNER_TEMP/assets.txt"
