@@ -21,6 +21,7 @@ Time-My-Galaxy/
 │   ├── ksud                  shared KernelSU late-load helper
 │   ├── S731BXXU9CZIF/        profile.json for one build
 │   ├── S731BXXS9CZJ2/        profile.json for one build
+│   ├── S731BXXS8BZG1/        profile.json for one build
 │   └── S731BXXUACZJC/        profile.json for one build
 ├── exploit/
 │   ├── build.sh              cross-compiles into build/payload/
@@ -68,6 +69,7 @@ Supported builds:
 
 - `S731BXXU9CZIF`
 - `S731BXXS9CZJ2`
+- `S731BXXS8BZG1`
 - `S731BXXUACZJC`
 
 Each supported build has `payloads/<BUILD>/profile.json`, the porter output
