@@ -29,7 +29,6 @@ import android.widget.TextView;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -78,6 +77,7 @@ public class MainActivity extends Activity implements PayloadStore.Log {
     private volatile Process tailProcess;
     private volatile String exploitPid;
     private volatile Targets.Target target;
+    private volatile String payloadError;
     private DeviceGate.Result gateResult;
 
     private volatile boolean ksuReady;
@@ -102,29 +102,76 @@ public class MainActivity extends Activity implements PayloadStore.Log {
         super.onCreate(savedInstanceState);
         setContentView(buildUi());
 
-        gateResult = DeviceGate.check(getAssets());
-        target = gateResult.target;
+        gateResult = DeviceGate.check(null);
+        target = null;
         gateView.setText(gateResult.detail);
         appendLog("Time-My-Galaxy\n");
-        if (target == null) {
-            appendLog("[-] no payload for this firmware\n");
-        } else {
-            appendLog("[+] target " + target.build + " (" + target.describe() + ")\n");
-        }
         appendLog("Transport: Shizuku shell (uid 2000)\n\n");
         refreshStatus();
+        resolvePayload(this::initialResolved);
+    }
+
+    private void initialResolved() {
         if (target == null) {
-            ui.post(this::showUnsupportedDialog);
+            showPayloadUnavailableDialog();
+        } else {
+            checkStaged();
         }
+    }
+
+    private void checkStaged() {
+        Targets.Target current = target;
         executor.execute(() -> {
-            Targets.Target current = target;
-            boolean staged = current != null && ShizukuBridge.isRunning()
-                    && ShizukuBridge.isGranted()
-                    && PayloadStore.isStaged(getAssets(), current.build);
+            boolean staged = current != null && current.dir != null
+                    && ShizukuBridge.isRunning() && ShizukuBridge.isGranted()
+                    && PayloadStore.isStaged(current.dir, current.build);
             ui.post(() -> appendLog(staged
                     ? "[+] payloads already staged in " + PayloadStore.REMOTE_DIR + "\n"
                     : "[*] payloads not staged yet\n"));
         });
+    }
+
+    /**
+     * Resolves the payload for this build, then runs {@code then} on the UI
+     * thread. The signed server manifest always wins when it is reachable;
+     * the saved bundle is used when it is not.
+     */
+    private void resolvePayload(Runnable then) {
+        executor.execute(() -> {
+            setBusy(true);
+            PayloadChannel.Resolution resolution = null;
+            try {
+                resolution = PayloadChannel.resolve(this, text -> appendLog(text));
+            } catch (Throwable t) {
+                appendLog("[-] payload setup failed: " + t.getMessage() + "\n");
+            }
+            final PayloadChannel.Resolution resolved = resolution;
+            ui.post(() -> {
+                if (resolved != null) {
+                    applyPayload(resolved);
+                }
+                setBusy(false);
+                if (then != null) {
+                    then.run();
+                }
+            });
+        });
+    }
+
+    private void applyPayload(PayloadChannel.Resolution resolution) {
+        payloadError = resolution.error;
+        if (resolution.ok()) {
+            target = resolution.target;
+            appendLog("[+] payload " + target.build + " (" + target.describe() + "), "
+                    + resolution.note + "\n");
+        } else {
+            target = null;
+            appendLog("[-] no payload: "
+                    + (resolution.error == null ? "unknown error" : resolution.error) + "\n");
+        }
+        gateResult = DeviceGate.check(target);
+        gateView.setText(gateResult.detail);
+        refreshStatus();
     }
 
     private View buildUi() {
@@ -162,18 +209,18 @@ public class MainActivity extends Activity implements PayloadStore.Log {
         row1.setOrientation(LinearLayout.HORIZONTAL);
         grantButton = button("Grant Shizuku");
         grantButton.setOnClickListener(v -> requestShizuku());
-        stageButton = button("Stage payloads");
-        stageButton.setOnClickListener(v -> stagePayloads());
+        stageButton = button("Refetch payload");
+        stageButton.setOnClickListener(v -> refetchPayload());
         row1.addView(grantButton, weight());
         row1.addView(stageButton, weight());
         root.addView(row1);
 
         LinearLayout row2 = new LinearLayout(this);
         row2.setOrientation(LinearLayout.HORIZONTAL);
-        runButton = button("Plant exploit");
+        runButton = button("Run exploit");
         runButton.setOnClickListener(v -> confirmRun());
-        stopButton = button("Stop (unsafe)");
-        stopButton.setOnClickListener(v -> stopActive());
+        stopButton = button("Restart SystemUI");
+        stopButton.setOnClickListener(v -> confirmRestartSystemUi());
         row2.addView(runButton, weight());
         row2.addView(stopButton, weight());
         root.addView(row2);
@@ -262,13 +309,14 @@ public class MainActivity extends Activity implements PayloadStore.Log {
         statusView.setText("Shizuku: " + (running
                 ? (granted ? "running, granted" : "running, permission needed")
                 : "not running")
-                + "   |   Target: " + (target == null ? "unsupported" : target.build)
+                + "   |   Target: " + (target == null ? "no payload" : target.build)
                 + "   |   Root: " + (ksuReady ? "KernelSU" : "not loaded"));
-        boolean runnable = target != null;
         grantButton.setEnabled(!busy.get());
-        stageButton.setEnabled(!busy.get() && granted && runnable);
-        runButton.setEnabled(!busy.get() && granted && runnable);
-        stopButton.setEnabled(busy.get());
+        // The handlers resolve the payload on demand, so leave stage and run
+        // enabled when the last fetch failed and let the user retry.
+        stageButton.setEnabled(!busy.get() && granted);
+        runButton.setEnabled(!busy.get() && granted);
+        stopButton.setEnabled(!busy.get() && granted);
         commandButton.setEnabled(!busy.get() && granted);
         checkButton.setEnabled(!busy.get() && granted);
     }
@@ -310,29 +358,31 @@ public class MainActivity extends Activity implements PayloadStore.Log {
         }));
     }
 
-    private void stagePayloads() {
+    private void refetchPayload() {
         if (busy.get()) {
             return;
         }
-        Targets.Target current = target;
-        if (current == null) {
-            showUnsupportedDialog();
-            return;
-        }
-        if (!current.verified) {
-            new AlertDialog.Builder(this)
-                    .setTitle("Untested payload")
-                    .setMessage("Payload " + current.build + " is not verified on this "
-                            + "firmware.\n\n"
-                            + "Staging copies it into " + PayloadStore.REMOTE_DIR
-                            + " and may not match the running kernel. Continue only if "
-                            + "you built it for this exact build.")
-                    .setNegativeButton("Cancel", null)
-                    .setPositiveButton("Stage anyway", (d, w) -> stageNow(current))
-                    .show();
-            return;
-        }
-        stageNow(current);
+        resolvePayload(() -> {
+            Targets.Target current = target;
+            if (current == null || current.dir == null) {
+                showPayloadUnavailableDialog();
+                return;
+            }
+            if (!current.verified) {
+                new AlertDialog.Builder(this)
+                        .setTitle("Untested payload")
+                        .setMessage("Payload " + current.build + " is not verified on this "
+                                + "firmware.\n\n"
+                                + "Staging copies it into " + PayloadStore.REMOTE_DIR
+                                + " and may not match the running kernel. Continue only if "
+                                + "you built it for this exact build.")
+                        .setNegativeButton("Cancel", null)
+                        .setPositiveButton("Stage anyway", (d, w) -> stageNow(current))
+                        .show();
+                return;
+            }
+            stageNow(current);
+        });
     }
 
     private void stageNow(Targets.Target current) {
@@ -341,7 +391,7 @@ public class MainActivity extends Activity implements PayloadStore.Log {
             try {
                 appendLog("[*] staging payload " + current.build + " into "
                         + PayloadStore.REMOTE_DIR + "\n");
-                PayloadStore.stageAll(getAssets(), current.build, this);
+                PayloadStore.stageAll(current.dir, current.build, this);
                 appendLog("[+] staging complete\n");
             } catch (Throwable t) {
                 appendLog("[-] staging failed: " + t.getMessage() + "\n");
@@ -352,31 +402,32 @@ public class MainActivity extends Activity implements PayloadStore.Log {
     }
 
     private void confirmRun() {
-        gateResult = DeviceGate.check(getAssets());
-        target = gateResult.target;
-        gateView.setText(gateResult.detail);
-        refreshStatus();
-        if (target == null) {
-            showUnsupportedDialog();
+        if (busy.get()) {
             return;
         }
-        final Targets.Target current = target;
-        String untested = current.verified ? "" : "\n\n"
-                + "WARNING: payload " + current.build + " is NOT verified on this "
-                + "firmware. An untested build can panic the kernel.";
-        new AlertDialog.Builder(this)
-                .setTitle(current.verified ? "Plant the exploit?" : "Plant the UNTESTED exploit?")
-                .setMessage("Target " + current.build + " (" + current.describe() + ").\n\n"
-                        + "Runs wr_timerfd as uid 2000 (Shizuku shell).\n\n"
-                        + "- One plant per boot. If this boot already ran it, reboot first.\n"
-                        + "- Takes roughly 30-60 s; keep the screen on and leave the phone alone.\n"
-                        + "- On success the process parks forever and must not be killed.\n"
-                        + "- A failed plant also needs a reboot, and either can panic the kernel.\n\n"
-                        + "Run only on a device you own." + untested)
-                .setNegativeButton("Cancel", null)
-                .setPositiveButton(current.verified ? "Run" : "Run anyway", (d, w) ->
-                        executeExploit())
-                .show();
+        resolvePayload(() -> {
+            Targets.Target current = target;
+            if (current == null || current.dir == null) {
+                showPayloadUnavailableDialog();
+                return;
+            }
+            String untested = current.verified ? "" : "\n\n"
+                    + "WARNING: payload " + current.build + " is NOT verified on this "
+                    + "firmware. An untested build can panic the kernel.";
+            new AlertDialog.Builder(this)
+                    .setTitle(current.verified ? "Run the exploit?" : "Run the UNTESTED exploit?")
+                    .setMessage("Target " + current.build + " (" + current.describe() + ").\n\n"
+                            + "Stages the payload, then runs wr_timerfd as uid 2000 (Shizuku shell).\n\n"
+                            + "- One plant per boot. If this boot already ran it, reboot first.\n"
+                            + "- Takes roughly 30-60 s; keep the screen on and leave the phone alone.\n"
+                            + "- On success the process parks forever and must not be killed.\n"
+                            + "- A failed plant also needs a reboot, and either can panic the kernel.\n\n"
+                            + "Run only on a device you own." + untested)
+                    .setNegativeButton("Cancel", null)
+                    .setPositiveButton(current.verified ? "Run" : "Run anyway", (d, w) ->
+                            executeExploit())
+                    .show();
+        });
     }
 
     private void executeExploit() {
@@ -392,14 +443,12 @@ public class MainActivity extends Activity implements PayloadStore.Log {
             Process tail = null;
             try {
                 Targets.Target current = target;
-                if (current == null) {
+                if (current == null || current.dir == null) {
                     appendLog("[-] no payload for this firmware\n");
                     return;
                 }
-                if (!PayloadStore.isStaged(getAssets(), current.build)) {
-                    appendLog("[*] payload " + current.build + " missing, staging first\n");
-                    PayloadStore.stageAll(getAssets(), current.build, this);
-                }
+                appendLog("[*] staging payload " + current.build + " before running\n");
+                PayloadStore.stageAll(current.dir, current.build, this);
 
                 String parked = readPidOrNull();
                 if (parked == null) {
@@ -592,47 +641,69 @@ public class MainActivity extends Activity implements PayloadStore.Log {
         });
     }
 
-    private void stopActive() {
-        String pid = exploitPid;
-        if (pid == null || !pid.matches("\\d+")) {
-            String now = readPidOrNull();
-            pid = now == null ? "" : now;
-        }
-        if (pid.isEmpty()) {
-            appendLog("[i] nothing to stop\n");
+    private void confirmRestartSystemUi() {
+        if (busy.get()) {
             return;
         }
-        final String targetPid = pid;
+        if (!ShizukuBridge.isRunning() || !ShizukuBridge.isGranted()) {
+            requestShizuku();
+            return;
+        }
         new AlertDialog.Builder(this)
-                .setTitle("Kill the exploit?")
-                .setMessage("Killing a planted exploit can panic the kernel.\n\n"
-                        + "The safe cleanup is a reboot. Kill anyway?")
+                .setTitle("Restart SystemUI?")
+                .setMessage("This needs root and restarts com.android.systemui so the "
+                        + "interface reloads.\n\n"
+                        + "It does not touch a parked exploit. The screen may go black "
+                        + "for a moment and the lock screen may appear.")
                 .setNegativeButton("Cancel", null)
-                .setPositiveButton("Kill (unsafe)", (d, w) -> {
-                    appendLog("[!] killing pid " + targetPid + "\n");
-                    new Thread(() -> {
-                        String out = captureShell("kill -9 " + targetPid + " 2>&1", 8000L);
-                        if (!out.trim().isEmpty() && !out.startsWith("error:")) {
-                            appendLog(out.trim() + "\n");
-                        }
-                        try {
-                            Thread.sleep(500);
-                        } catch (InterruptedException ignored) {
-                        }
-                        String now = readPidOrNull();
-                        if (now == null) {
-                            appendLog("[!] Shizuku unavailable; check pidof manually\n");
-                        } else if (now.isEmpty()) {
-                            appendLog("[i] process gone; reboot before the next attempt\n");
-                        } else {
-                            appendLog("[!] still running; trying su\n");
-                            captureShell("su -c " + quote("kill -9 " + targetPid), 8000L);
-                        }
-                        exploitPid = null;
-                        setBusy(false);
-                    }, "stop-exploit").start();
-                })
+                .setPositiveButton("Restart", (d, w) -> restartSystemUi())
                 .show();
+    }
+
+    /**
+     * Shell uid 2000 cannot kill the system UI, so this runs su and refuses to
+     * act unless su confirms uid 0. The parked exploit is left untouched.
+     */
+    private void restartSystemUi() {
+        executor.execute(() -> {
+            setBusy(true);
+            try {
+                String id = captureShell("su -c " + quote("id"), 20000L).trim();
+                appendLog("[*] su -c id: " + id + "\n");
+                if (!id.contains("uid=0")) {
+                    ksuReady = false;
+                    appendLog("[-] restart SystemUI needs root; su did not return uid=0\n");
+                    ui.post(() -> new AlertDialog.Builder(this)
+                            .setTitle("Root required")
+                            .setMessage("Restarting SystemUI only works with root, and su did "
+                                    + "not return uid=0 on this boot.\n\n"
+                                    + "Run the exploit first and confirm root with "
+                                    + "\"Check root\".")
+                            .setPositiveButton("OK", null)
+                            .show());
+                    return;
+                }
+                ksuReady = true;
+                appendLog("[*] restarting com.android.systemui\n");
+                String out = captureShell(
+                        "su -c " + quote("kill -9 $(pidof com.android.systemui)"), 15000L);
+                if (!out.trim().isEmpty() && !out.startsWith("error:")) {
+                    appendLog(out.trim() + "\n");
+                }
+                Thread.sleep(2000);
+                String pid = captureShell("pidof com.android.systemui 2>/dev/null", 5000L).trim();
+                if (pid.matches("\\d+")) {
+                    appendLog("[+] SystemUI restarted, pid " + pid + "\n");
+                } else {
+                    appendLog("[!] SystemUI pid not visible; check the screen\n");
+                }
+            } catch (Throwable t) {
+                appendLog("[-] restart failed: " + t.getMessage() + "\n");
+            } finally {
+                setBusy(false);
+                ui.post(this::refreshStatus);
+            }
+        });
     }
 
     private void runRootCommand() {
@@ -812,25 +883,20 @@ public class MainActivity extends Activity implements PayloadStore.Log {
         return thread;
     }
 
-    private void showUnsupportedDialog() {
+    private void showPayloadUnavailableDialog() {
         StringBuilder message = new StringBuilder();
         if (gateResult != null) {
             message.append(gateResult.detail).append("\n\n");
         }
-        List<Targets.Target> all = Targets.all(getAssets());
-        if (all.isEmpty()) {
-            message.append("No payloads are bundled in this APK.");
-        } else {
-            message.append("Available payloads:\n");
-            for (Targets.Target item : all) {
-                message.append("- ").append(item.label())
-                        .append(" (").append(item.describe()).append(")\n");
-            }
-            message.append("\nThis firmware does not match any bundled build. "
-                    + "Do not run the exploit here.");
+        message.append("No payload is available for this firmware build.\n\n")
+                .append("Connect to the internet and try again. If this build is not "
+                        + "supported yet, there is nothing to download.\n\n")
+                .append("The bundle is downloaded once and then kept for offline use.");
+        if (payloadError != null) {
+            message.append("\n\nLast error: ").append(payloadError);
         }
         new AlertDialog.Builder(this)
-                .setTitle("Firmware not supported")
+                .setTitle("Payload not available")
                 .setMessage(message.toString())
                 .setPositiveButton("OK", null)
                 .show();

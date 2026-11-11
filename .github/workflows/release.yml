@@ -19,30 +19,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Build every payload
-        run: |
-          docker run --rm \
-            -v "$PWD:/src" \
-            -w /src \
-            archlinux:latest \
-            bash -c '
-              set -euo pipefail
-              pacman -Syu --noconfirm --needed --quiet \
-                aarch64-linux-gnu-gcc python >/dev/null
-              shopt -s nullglob
-              profiles=(assets/payload/*/profile.json)
-              if [ ${#profiles[@]} -eq 0 ]; then
-                echo "no payload profiles found" >&2
-                exit 1
-              fi
-              for profile in "${profiles[@]}"; do
-                build=$(basename "$(dirname "$profile")")
-                echo "== $build =="
-                PROFILE="$profile" BUILD="$build" ./exploit/build.sh
-              done
-            '
-          sudo chown -R "$(id -u):$(id -g)" assets/payload
-
       - name: Read version
         id: version
         run: |

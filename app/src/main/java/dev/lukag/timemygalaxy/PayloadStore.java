@@ -1,19 +1,20 @@
 package dev.lukag.timemygalaxy;
 
-import android.content.res.AssetManager;
-
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.security.MessageDigest;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Set;
 
 /**
  * Stages one build's exploit payload into /data/local/tmp/wr through Shizuku.
  * Everything runs as uid 2000; the app sandbox never executes anything.
+ *
+ * The source directory is the verified bundle in the app's files directory,
+ * populated by PayloadChannel. Nothing is bundled in the APK.
  */
 final class PayloadStore {
 
@@ -23,7 +24,7 @@ final class PayloadStore {
 
     static final String REMOTE_DIR = "/data/local/tmp/wr";
 
-    private static final String[] FILES = {"wr_timerfd", "wr_exec", "ksud"};
+    static final String[] FILES = {"wr_timerfd", "wr_exec", "ksud"};
 
     private PayloadStore() {
     }
@@ -32,15 +33,17 @@ final class PayloadStore {
         return REMOTE_DIR + "/" + name;
     }
 
-    static boolean isStaged(AssetManager assets, String build) {
-        if (!usableBuild(build)) {
+    static boolean isStaged(File dir, String build) {
+        if (!usableBuild(build) || dir == null) {
             return false;
         }
         try {
             for (String name : FILES) {
-                String asset = assetPath(build, name);
-                String remote = remotePath(name);
-                if (!digest(assets, asset).equalsIgnoreCase(remoteDigest(remote))) {
+                File local = new File(dir, name);
+                if (!local.isFile()) {
+                    return false;
+                }
+                if (!digest(local).equalsIgnoreCase(remoteDigest(remotePath(name)))) {
                     return false;
                 }
             }
@@ -50,24 +53,24 @@ final class PayloadStore {
         }
     }
 
-    static void stageAll(AssetManager assets, String build, Log log) throws Exception {
-        if (!usableBuild(build)) {
+    static void stageAll(File dir, String build, Log log) throws Exception {
+        if (!usableBuild(build) || dir == null) {
             throw new IOException("bad payload build id: " + build);
         }
         ensureRemoteDir();
 
-        List<String> missing = missing(assets, build);
+        List<String> missing = missing(dir);
         if (!missing.isEmpty()) {
             throw new IOException("payload " + build + " is incomplete: missing "
                     + String.join(", ", missing));
         }
 
         for (String name : FILES) {
-            String asset = assetPath(build, name);
+            File local = new File(dir, name);
             String remote = remotePath(name);
-            String localDigest = digest(assets, asset);
-            log.line("[*] staging " + remote + " (" + readableSize(assets, asset) + ")");
-            try (InputStream in = assets.open(asset)) {
+            String localDigest = digest(local);
+            log.line("[*] staging " + remote + " (" + local.length() + " bytes)");
+            try (InputStream in = new FileInputStream(local)) {
                 ShizukuBridge.writeFile(remote, "755", in);
             }
             String remoteDigest = remoteDigest(remote);
@@ -79,34 +82,20 @@ final class PayloadStore {
         }
     }
 
-    static String assetPath(String build, String name) {
-        return "payload/" + build + "/" + name;
+    static boolean usableBuild(String build) {
+        return build != null && !build.isEmpty()
+                && !".".equals(build) && !"..".equals(build)
+                && build.matches("[A-Za-z0-9._-]+");
     }
 
-    private static List<String> missing(AssetManager assets, String build) {
+    private static List<String> missing(File dir) {
         List<String> missing = new ArrayList<>();
-        Set<String> present = new HashSet<>();
-        try {
-            String[] files = assets.list("payload/" + build);
-            if (files != null) {
-                for (String file : files) {
-                    present.add(file);
-                }
-            }
-        } catch (IOException ignored) {
-        }
         for (String name : FILES) {
-            if (!present.contains(name)) {
+            if (!new File(dir, name).isFile()) {
                 missing.add(name);
             }
         }
         return missing;
-    }
-
-    private static boolean usableBuild(String build) {
-        return build != null && !build.isEmpty()
-                && !".".equals(build) && !"..".equals(build)
-                && build.matches("[A-Za-z0-9._-]+");
     }
 
     private static void ensureRemoteDir() throws Exception {
@@ -130,9 +119,9 @@ final class PayloadStore {
         return parts[0];
     }
 
-    private static String digest(AssetManager assets, String asset) throws Exception {
+    static String digest(File file) throws Exception {
         MessageDigest md = MessageDigest.getInstance("SHA-256");
-        try (InputStream in = assets.open(asset)) {
+        try (InputStream in = new FileInputStream(file)) {
             byte[] buffer = new byte[64 * 1024];
             int read;
             while ((read = in.read(buffer)) > 0) {
@@ -144,14 +133,5 @@ final class PayloadStore {
             hex.append(String.format(Locale.US, "%02x", b));
         }
         return hex.toString();
-    }
-
-    private static String readableSize(AssetManager assets, String asset) {
-        try (InputStream in = assets.open(asset)) {
-            int size = in.available();
-            return size > 0 ? size + " bytes" : "unknown size";
-        } catch (IOException e) {
-            return "unknown size";
-        }
     }
 }

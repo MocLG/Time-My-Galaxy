@@ -5,6 +5,8 @@
         <package android:name="moe.shizuku.privileged.api" />
     </queries>
 
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <application
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"

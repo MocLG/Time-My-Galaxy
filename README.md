@@ -8,16 +8,22 @@ The exploit runs as the Android shell user (uid 2000) through Shizuku and
 loads KernelSU with `me.weishu.kernelsu`. The app never executes a payload
 inside its own sandbox.
 
+Payloads are not bundled in the APK. On first use the app downloads the
+bundle for the running build from a signed channel and keeps it for offline
+use.
+
 ## Layout
 
 ```
 Time-My-Galaxy/
 ├── app/                      Android app (Java sources, manifest, icon)
-├── assets/payload/
-│   ├── S731BXXU9CZIF/        SM-S731B (S25 FE)
-│   └── S731BXXS9CZJ2/        SM-S731B (S25 FE)
+├── payloads/
+│   ├── ksud                  shared KernelSU late-load helper
+│   ├── S731BXXU9CZIF/        profile.json for one build
+│   ├── S731BXXS9CZJ2/        profile.json for one build
+│   └── S731BXXUACZJC/        profile.json for one build
 ├── exploit/
-│   ├── build.sh              cross-compiles into assets/payload/
+│   ├── build.sh              cross-compiles into build/payload/
 │   └── src/
 │       ├── wr_timerfd.c     main chain
 │       ├── krw_root.c        kernel read/write helpers
@@ -25,15 +31,14 @@ Time-My-Galaxy/
 │       ├── wroot_stage.c     pipe -> workqueue UMH stage
 │       └── wr_exec.c         exec shim
 ├── tools/adb_run.sh          manual ADB fallback for development
+├── tools/pack_payloads.py    packs and signs the payload bundles
 ├── tools/port_firmware.py    firmware -> offsets/port profile extractor
 ├── tools/port_firmware.sh    dependency-checking wrapper for the extractor
 ├── build.sh                  APK build wrapper
 └── README.md
 ```
 
-`app/build.gradle` merges `../assets` into the APK asset tree, so the binaries
-exist in exactly one place. `exploit/build.sh` rebuilds them there. Each
-`assets/payload/<BUILD>/` directory is one supported firmware build. The
+Each `payloads/<BUILD>/` directory is one supported firmware build. The
 directory name is the build id.
 
 ## Build
@@ -41,47 +46,52 @@ directory name is the build id.
 Most users only need the debug APK:
 
 ```sh
-./exploit/build.sh      # wr_timerfd + wr_exec -> assets/payload/...
+./exploit/build.sh      # wr_timerfd + wr_exec -> build/payload/<BUILD>/
 ./build.sh              # debug APK (default)
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-To build a signed release APK instead, pass the `release` flag:
+To build a signed release APK instead, pass the `release` flag and a keystore
+properties file:
 
 ```sh
-./build.sh release      # signed with ~/.android/release-keystore.properties
 ./build.sh release /path/to/keystore.properties
 adb install -r app/build/outputs/apk/release/app-release.apk
 ```
-
-Release signing reads `storeFile=`, `alias=`, and `password=` from the given
-properties file, then `$KEYSTORE_PROPS`, then
-`~/.android/release-keystore.properties`. If none exists, the build fails before
-Gradle starts. The keystore and its secrets stay outside the repository. The
-debug build does not need a key.
 
 Requires JDK 17, Android SDK platform 35, and
 `aarch64-linux-gnu-gcc` for the payload.
 
 ## Payloads
 
-| Device | Firmware |
-|---|---|
-| SM-S731B (S25 FE) | `S731BXXU9CZIF` |
-| SM-S731B (S25 FE) | `S731BXXS9CZJ2` |
-| SM-S731B (S25 FE) | `S731BXXUACZJC` |
+Supported builds:
 
-Each `profile.json` is the porter output copied unchanged from
-`port-out/<BUILD>/profile.json`. The app trusts only that schema. The porter
-sets `verified` with `--verified`, which is used only after the chain completes
-on the device.
+- `S731BXXU9CZIF`
+- `S731BXXS9CZJ2`
+- `S731BXXUACZJC`
+
+Each supported build has `payloads/<BUILD>/profile.json`, the porter output
+copied unchanged from `port-out/<BUILD>/profile.json`. The app trusts only
+that schema. The porter sets `verified` with `--verified`, which is used only
+after the chain completes on the device. `payloads/ksud` is shared by every
+bundle.
+
+The app reads the build id from the device, requests only that build's signed
+manifest and bundle, verifies the signature and every file hash, and stores
+the result in app-private storage. A reachable server always wins. When the
+server cannot be reached, the last saved bundle is verified again and used.
+The first run needs a working internet connection.
 
 ## Use
 
 1. Start Shizuku as the shell user.
-2. Open the app, tap **Grant Shizuku**, then **Stage payloads**.
-3. Tap **Plant exploit** and leave the phone alone for 30-60 s.
+2. Open the app and tap **Grant Shizuku**.
+3. Tap **Refetch payload** to check the signed channel again, or go straight
+   to **Run exploit**, which refetches, stages the payload into
+   `/data/local/tmp/wr`, and plants it. Leave the phone alone for 30-60 s.
 4. Wait for `done` in the log, then **Check root**.
+5. **Restart SystemUI** only works when `su` returns uid 0. It reloads the
+   interface and leaves a parked exploit alone.
 
 The helper stages `ksud` to `/data/local/tmp/.ksud-stage`, bind-mounts it over
 `/system/bin/logcat`, and late-loads it. The exploit writes
@@ -100,9 +110,9 @@ cgroup kill, or reboot. Exit would free kernel objects that are still
 referenced, so it parks. Killing a parked process can panic the kernel.
 
 After `done`, the app sets the parked process's `oom_score_adj` to `-1000` to
-keep LMKD away. Until KernelSU loads, keep the phone idle. **Stop (unsafe)**
-requires confirmation and warns that reboot is the only safe cleanup. One plant
-per boot. Reboot before retrying.
+keep LMKD away. Until KernelSU loads, keep the phone idle. There is no kill
+button, reboot is the only safe cleanup. One plant per boot. Reboot before
+retrying.
 
 ## Porting to another device
 
@@ -132,7 +142,7 @@ The tool writes `port-out/<BUILD>/`:
 offsets.h          drop-in replacement for the #define block
 profile.json       build metadata plus machine-readable values
 report.txt         human-readable summary and warnings
-target.java.txt    legacy reference entry (the app discovers assets itself)
+target.java.txt    legacy reference entry
 System.map         reconstructed kernel symbol table
 kernel-config.txt  embedded IKCONFIG
 work/              boot.img, Image, vmlinux.elf, vmlinux-to-elf log
@@ -144,32 +154,22 @@ return addresses by decoding the `bl` instructions in `do_timer_create`,
 `prepare_ro_creds`, and `dup_task_struct`. Generated values for the reference
 build are numerically identical to the verified `S731BXXU9CZIF` constants.
 
-To build a port, create the build directory and compile the exploit:
+To build a port, create the profile directory and compile the exploit:
 
 ```sh
-mkdir -p assets/payload/<BUILD>
-cp assets/payload/S731BXXU9CZIF/wr_exec assets/payload/<BUILD>/
+mkdir -p payloads/<BUILD>
+cp port-out/<BUILD>/profile.json payloads/<BUILD>/profile.json
 PROFILE=port-out/<BUILD>/offsets.h BUILD=<BUILD> ./exploit/build.sh
-cp port-out/<BUILD>/profile.json assets/payload/<BUILD>/profile.json
 ```
 
-Each build directory also needs a `ksud` late-load helper at
-`assets/payload/<BUILD>/ksud`. The bundled S731B `ksud` may work on other
-builds. If late-load fails, use a `ksud` built for the target device, kernel,
-and KMI.
+The shared helper at `payloads/ksud` is included in every bundle. If late-load
+fails, replace it with a `ksud` built for the target device, kernel, and KMI.
 
-The directory name is the build id. The APK discovers every
-`assets/payload/*` directory that contains a `wr_timerfd` binary at runtime, so
-no Java table needs editing. `profile.json` must be the porter-generated file,
-copied unchanged from `port-out/<BUILD>/profile.json`. A directory without it
-is still usable but is treated as untested.
-
-On start the app compares `Build.FINGERPRINT`, `VERSION.INCREMENTAL`, `DISPLAY`,
-and `ID` against the bundled build ids and selects the match (the longest build
-id wins). If the matched payload is not marked verified, **Stage payloads** and
-**Plant exploit** show a warning and require explicit confirmation. After the
-chain completes on the hardware, rerun the porter with `--verified`, copy the
-new `profile.json`, and rebuild. Do not hand-edit it.
+The directory name is the build id. The app reads `VERSION.INCREMENTAL` and
+falls back to `DISPLAY`, `FINGERPRINT`, and `ID`, so no Java table needs
+editing. `profile.json` must be the porter-generated file, copied unchanged
+from `port-out/<BUILD>/profile.json`. A build without it is still usable but
+is treated as untested.
 
 `MEMSTART_PAGE` is board runtime
 data and is not derivable from the firmware. The tool defaults to `0x80000`
