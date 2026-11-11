@@ -55,7 +55,7 @@ jobs:
                 PROFILE="$profile" BUILD="$build" ./exploit/build.sh
               done
             '
-          sudo chown -R "$(id -u):$(id -g)" build/payload
+          sudo chown -R "$(id -u):$(id -g)" build
 
       - name: Export signing key
         env:
