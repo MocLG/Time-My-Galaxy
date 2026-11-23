@@ -66,6 +66,7 @@ Supported builds:
 - `S731U1UES7BZF3`
 - `X236BXXS7BZI3`
 - `S721BXXUEEZIF` (SM-S721B / Galaxy S24 FE, kernel 6.1.162, verified)
+- `S721BXXUFEZJ6` (SM-S721B / Galaxy S24 FE, kernel 6.1.162 rebuild Oct 19, verified)
 
 Each build has a porter-generated `payloads/<BUILD>/profile.json`, and its
 kernel release needs a `payloads/ksud-<release>` helper. The app downloads only
