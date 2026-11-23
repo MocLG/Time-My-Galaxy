@@ -4,6 +4,11 @@ CVE-2026-98260 timerfd exploit and Shizuku launcher for Samsung devices.
 Payloads are keyed by the Samsung PDA string from
 `ro.build.version.incremental`.
 
+> Fork note: this fork adds a verified port for the Galaxy S24 FE (SM-S721B,
+> build `S721BXXUEEZIF`, kernel `6.1.162-android14-11`, Android 17). The chain
+> was confirmed on hardware (KernelSU 3.2.5 loaded, root granted). See the
+> releases page for a prebuilt launcher APK and the S721B payload bundle.
+
 The exploit runs as the Android shell user (uid 2000) through Shizuku and
 loads KernelSU (`me.weishu.kernelsu`). It never runs inside the app sandbox.
 
@@ -54,6 +59,7 @@ Supported builds:
 - `A376BXXS6BZJ1`
 - `S731U1UES7BZF3`
 - `X236BXXS7BZI3`
+- `S721BXXUEEZIF` (SM-S721B / Galaxy S24 FE, kernel 6.1.162, verified)
 
 Each build has a porter-generated `payloads/<BUILD>/profile.json`, and its
 kernel release needs a `payloads/ksud-<release>` helper. The app downloads only
