@@ -62,7 +62,7 @@ final class PayloadChannel {
     }
 
     static final String BASE =
-            "https://github.com/MocLG/Time-My-Galaxy/releases/download/payloads/";
+            "https://github.com/emirercan3459/Time-My-Galaxy-S721B/releases/download/payloads/";
 
     private static final int MANIFEST_TIMEOUT_MS = 4000;
     private static final int ZIP_CONNECT_TIMEOUT_MS = 8000;

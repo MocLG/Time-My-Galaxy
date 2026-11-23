@@ -6,8 +6,14 @@ Payloads are keyed by the Samsung PDA string from
 
 > Fork note: this fork adds a verified port for the Galaxy S24 FE (SM-S721B,
 > build `S721BXXUEEZIF`, kernel `6.1.162-android14-11`, Android 17). The chain
-> was confirmed on hardware (KernelSU 3.2.5 loaded, root granted). See the
-> releases page for a prebuilt launcher APK and the S721B payload bundle.
+> was confirmed on hardware (KernelSU 3.2.5 loaded, root granted).
+>
+> The app's payload channel (`PayloadChannel.BASE`) and signing certificate
+> (`res/raw/payload_signing.pem`) point at this fork's own signed `payloads`
+> release, so the prebuilt APK downloads and verifies the S721B bundle on its
+> own — no manual `adb` staging needed. Start Shizuku as the shell user, open
+> the app, and tap **Run exploit**. Root is tethered: re-run after each reboot.
+> See the releases page for the launcher APK and the payload bundle.
 
 The exploit runs as the Android shell user (uid 2000) through Shizuku and
 loads KernelSU (`me.weishu.kernelsu`). It never runs inside the app sandbox.
