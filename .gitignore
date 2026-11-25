@@ -15,3 +15,6 @@
 /port-out/
 __pycache__/
 *.pyc
+
+# large Samsung firmware archives (never commit)
+*.tar.md5
