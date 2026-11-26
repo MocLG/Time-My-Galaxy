@@ -64,14 +64,15 @@ final class RunChecks {
     private RunChecks() {
     }
 
-    static Result run(Shell.Log log) {
+    static Result run(Provider provider, Shell.Log log) {
+        String code = String.valueOf(provider.versionCode);
         String script = "id 2>&1"
                 + "; echo " + MARKER + "1"
                 + "; /data/local/tmp/wr/ksud --version 2>&1"
                 + "; echo " + MARKER + "2"
                 + "; ls /data/adb/modules 2>&1"
                 + "; echo " + MARKER + "3"
-                + "; pm list packages --show-versioncode me.weishu.kernelsu 2>&1";
+                + "; pm list packages --show-versioncode " + provider.packageName + " 2>&1";
         String out = Shell.root(script, 40_000L, log);
         String[] parts = out.split("__tmg_sep_[0-9]", 4);
 
@@ -84,8 +85,8 @@ final class RunChecks {
         boolean root = id.contains("uid=0");
         rows.add(new Row(root, "root", root ? firstLine(id) : "su did not return uid=0"));
 
-        boolean ksudOk = ksud.contains("3.2.5") || ksud.contains("32525");
-        rows.add(new Row(ksudOk, "ksud", firstLine(ksud)));
+        boolean ksudOk = ksud.contains(provider.ksudVersionToken) || ksud.contains(code);
+        rows.add(new Row(ksudOk, "ksud (" + provider.label + ")", firstLine(ksud)));
 
         String moduleList = modules.trim().replaceAll("\\s+", ", ");
         if (moduleList.length() > 120) {
@@ -94,8 +95,8 @@ final class RunChecks {
         rows.add(new Row(!moduleList.isEmpty() && !moduleList.startsWith("ls: "),
                 "modules", moduleList.isEmpty() ? "none" : moduleList));
 
-        boolean managerOk = manager.contains("versionCode:32525")
-                || manager.contains("versionCode=32525");
+        boolean managerOk = manager.contains("versionCode:" + code)
+                || manager.contains("versionCode=" + code);
         rows.add(new Row(managerOk, "manager", firstLine(manager)));
 
         return new Result(rows);

@@ -119,6 +119,8 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
     private Button checkButton;
     private TextView commandOutput;
     private MaterialSwitch darkSwitch;
+    private MaterialSwitch providerSwitch;
+    private TextView providerNote;
 
     private LinearLayout historyList;
     private TextView historyEmpty;
@@ -132,6 +134,7 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
 
     private volatile boolean ksuReady;
     private boolean darkTheme;
+    private boolean providerSync;
     private boolean followLogs = true;
     private boolean autoRequested;
     private int ansiDefaultColor = 0xFFF0F0F0;
@@ -316,6 +319,8 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
         commandButton = view.findViewById(R.id.commandButton);
         checkButton = view.findViewById(R.id.checkButton);
         darkSwitch = view.findViewById(R.id.darkSwitch);
+        providerSwitch = view.findViewById(R.id.providerSwitch);
+        providerNote = view.findViewById(R.id.providerNote);
 
         repairButton.setOnClickListener(v -> repairManager());
         buildsButton.setOnClickListener(v ->
@@ -350,6 +355,34 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
             recreate();
         });
 
+        providerSwitch.setChecked(Provider.selected(this) == Provider.NEXT);
+        providerSwitch.setOnCheckedChangeListener((button, checked) -> {
+            if (providerSync) {
+                return;
+            }
+            Provider wanted = checked ? Provider.NEXT : Provider.LEGACY;
+            Targets.Target current = target;
+            if (checked && (current == null
+                    || !current.providers.contains(Provider.NEXT_ID))) {
+                providerSync = true;
+                providerSwitch.setChecked(false);
+                providerSync = false;
+                new MaterialAlertDialogBuilder(this)
+                        .setTitle("KernelSU-Next not in this payload")
+                        .setMessage("The loaded payload does not carry ksud-next. "
+                                + "Refresh the payload (tap the build chip) or update "
+                                + "the app first.")
+                        .setPositiveButton("OK", null)
+                        .show();
+                return;
+            }
+            Provider.select(this, wanted);
+            appendLog("[i] provider: " + wanted.label + " (" + wanted.versionName + ")\n");
+            refreshManagerStatus();
+            refreshStatus();
+            checkStaged();
+        });
+
         aboutText.setText("Time My Galaxy " + BuildConfig.VERSION_NAME
                 + " (" + BuildConfig.VERSION_CODE + ")\nCommit " + BuildConfig.GIT_COMMIT
                 + "\n" + BuildConfig.REPO_URL);
@@ -381,6 +414,9 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
             buildChip.setText(hasPayload
                     ? "● " + target.build + (target.verified ? "" : " · untested")
                     : "● No payload");
+        }
+        if (providerSwitch != null) {
+            providerSwitch.setEnabled(!busy.get());
         }
         if (gateCard != null) {
             // The plant is marked at launch, so keep the warning hidden until
@@ -428,7 +464,8 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
             String status;
             try {
                 status = ManagerPin.status((command, timeoutMs) ->
-                        captureShell(command, timeoutMs, "/data/local/tmp"));
+                        captureShell(command, timeoutMs, "/data/local/tmp"),
+                        activeProvider());
             } catch (Throwable t) {
                 status = "unavailable: " + message(t);
             }
@@ -551,7 +588,7 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
         executor.execute(() -> {
             boolean staged = current != null && current.dir != null
                     && ShizukuBridge.isRunning() && ShizukuBridge.isGranted()
-                    && PayloadStore.isStaged(current.dir, current.build);
+                    && PayloadStore.isStaged(current.dir, current.build, activeProvider());
             ui.post(() -> appendLog(staged
                     ? "[+] payloads already staged in " + PayloadStore.REMOTE_DIR + "\n"
                     : "[*] payloads not staged yet\n"));
@@ -617,6 +654,10 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
         }
     }
 
+    private Provider activeProvider() {
+        return Provider.selected(this);
+    }
+
     private void requestShizuku() {
         if (!ShizukuBridge.isRunning()) {
             new MaterialAlertDialogBuilder(this)
@@ -673,7 +714,7 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
             try {
                 appendLog("[*] staging payload " + current.build + " into "
                         + PayloadStore.REMOTE_DIR + "\n");
-                PayloadStore.stageAll(current.dir, current.build, this);
+                PayloadStore.stageAll(current.dir, current.build, activeProvider(), this);
                 appendLog("[+] staging complete\n");
             } catch (Throwable t) {
                 appendLog("[-] staging failed: " + message(t) + "\n");
@@ -698,12 +739,15 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
                 showPayloadUnavailableDialog();
                 return;
             }
+            Provider run = activeProvider();
             String untested = current.verified ? "" : "\n\n"
                     + "WARNING: payload " + current.build + " is NOT verified on this "
                     + "firmware. An untested build can panic the kernel.";
             new MaterialAlertDialogBuilder(this)
-                    .setTitle(current.verified ? "Run the exploit?" : "Run the UNTESTED exploit?")
+                    .setTitle(current.verified ? "Run the exploit?"
+                            : "Run the UNTESTED exploit?")
                     .setMessage("Target " + current.build + " (" + current.describe() + ").\n\n"
+                            + "Provider " + run.label + " (" + run.versionName + ").\n\n"
                             + "Stages the payload, then runs wr_timerfd as uid 2000 (Shizuku shell).\n\n"
                             + "- One plant per boot. If this boot already ran it, reboot first.\n"
                             + "- Takes roughly 30-60 s; keep the screen on and leave the phone alone.\n"
@@ -745,6 +789,7 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
             String detail = "";
             try {
                 Targets.Target current = target;
+                Provider run = activeProvider();
                 if (current == null || current.dir == null) {
                     appendLog("[-] no payload for this firmware\n");
                     outcome = "no payload";
@@ -759,8 +804,9 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
                 RunService.start(this, current.build);
                 RunService.update("Staging payload " + current.build);
 
-                appendLog("[*] staging payload " + current.build + " before running\n");
-                PayloadStore.stageAll(current.dir, current.build, this);
+                appendLog("[*] staging payload " + current.build + " (" + run.label
+                        + ") before running\n");
+                PayloadStore.stageAll(current.dir, current.build, run, this);
 
                 String parked = readPidOrNull();
                 if (parked == null) {
@@ -790,7 +836,7 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
                 // Best effort; never gates the run.
                 try {
                     ManagerPin.Result pin = ManagerPin.ensure(
-                            getFilesDir(),
+                            getFilesDir(), run,
                             (command, timeoutMs) ->
                                     captureShell(command, timeoutMs, "/data/local/tmp"),
                             text -> appendLog(text + "\n"));
@@ -949,7 +995,8 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
                     }
                     appendLog("[i] exploit stays parked until reboot; do not kill it\n");
                     RunService.update("Run done, checking root");
-                    RunChecks.Result checks = RunChecks.run(text -> appendLog(text + "\n"));
+                    RunChecks.Result checks = RunChecks.run(run,
+                            text -> appendLog(text + "\n"));
                     appendLog(checks.text() + "\n");
                     detail = checks.oneLine();
                     ui.post(() -> showChecks(checks.text()));
@@ -1030,7 +1077,8 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
             setBusy(true);
             try {
                 appendLog("[*] running root checks\n");
-                RunChecks.Result checks = RunChecks.run(text -> appendLog(text + "\n"));
+                RunChecks.Result checks = RunChecks.run(activeProvider(),
+                        text -> appendLog(text + "\n"));
                 appendLog(checks.text() + "\n");
                 if (checks.root()) {
                     ksuReady = true;
@@ -1060,7 +1108,7 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
             setBusy(true);
             try {
                 ManagerPin.Result result = ManagerPin.ensure(
-                        getFilesDir(),
+                        getFilesDir(), activeProvider(),
                         (command, timeoutMs) ->
                                 captureShell(command, timeoutMs, "/data/local/tmp"),
                         text -> appendLog(text + "\n"));
@@ -1253,6 +1301,9 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
                 .append('\n');
         out.append("manager ").append(managerStatus == null ? "?" : managerStatus.getText())
                 .append('\n');
+        Provider provider = activeProvider();
+        out.append("provider ").append(provider.label).append(' ')
+                .append(provider.versionName).append('\n');
         out.append("ledger ")
                 .append(RunStore.blockReason(this) == null ? "clear" : "blocked this boot")
                 .append('\n');

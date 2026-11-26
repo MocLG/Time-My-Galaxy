@@ -41,13 +41,16 @@ final class RunStore {
         final long startedAt;
         final boolean verified;
         final int rev;
+        final boolean custom;
 
-        Begin(String id, String build, long startedAt, boolean verified, int rev) {
+        Begin(String id, String build, long startedAt, boolean verified, int rev,
+                boolean custom) {
             this.id = id;
             this.build = build;
             this.startedAt = startedAt;
             this.verified = verified;
             this.rev = rev;
+            this.custom = custom;
         }
     }
 
@@ -63,10 +66,11 @@ final class RunStore {
         final boolean verified;
         final boolean root;
         final boolean swapped;
+        final boolean custom;
 
         RunRecord(String id, String build, String outcome, String detail, int rev,
                 long startedAt, long finishedAt, long durationMs, boolean verified,
-                boolean root, boolean swapped) {
+                boolean root, boolean swapped, boolean custom) {
             this.id = id;
             this.build = build;
             this.outcome = outcome;
@@ -78,6 +82,7 @@ final class RunStore {
             this.verified = verified;
             this.root = root;
             this.swapped = swapped;
+            this.custom = custom;
         }
 
         JSONObject toJson() {
@@ -94,6 +99,7 @@ final class RunStore {
                 json.put("verified", verified);
                 json.put("root", root);
                 json.put("swapped", swapped);
+                json.put("custom", custom);
             } catch (Throwable ignored) {
             }
             return json;
@@ -111,7 +117,8 @@ final class RunStore {
                     json.optLong("durationMs", 0),
                     json.optBoolean("verified", false),
                     json.optBoolean("root", false),
-                    json.optBoolean("swapped", false));
+                    json.optBoolean("swapped", false),
+                    json.optBoolean("custom", false));
         }
 
         String meta() {
@@ -123,6 +130,9 @@ final class RunStore {
             out.append(" · ").append(root ? "root ok" : "no root");
             if (swapped) {
                 out.append(" · manager swapped");
+            }
+            if (custom) {
+                out.append(" · custom");
             }
             return out.toString();
         }
@@ -163,15 +173,21 @@ final class RunStore {
     }
 
     static Begin begin(Context context, String build, boolean verified, int rev) {
+        return begin(context, build, verified, rev, false);
+    }
+
+    static Begin begin(Context context, String build, boolean verified, int rev,
+            boolean custom) {
         long now = System.currentTimeMillis();
-        return new Begin(now + "-" + build, build, now, verified, rev);
+        return new Begin(now + "-" + build, build, now, verified, rev, custom);
     }
 
     static void finish(Context context, Begin begin, String outcome, String detail,
             boolean root, boolean swapped) {
         long now = System.currentTimeMillis();
         RunRecord record = new RunRecord(begin.id, begin.build, outcome, detail, begin.rev,
-                begin.startedAt, now, now - begin.startedAt, begin.verified, root, swapped);
+                begin.startedAt, now, now - begin.startedAt, begin.verified, root, swapped,
+                begin.custom);
         synchronized (LOCK) {
             List<String> lines = new ArrayList<>();
             lines.add(record.toJson().toString());

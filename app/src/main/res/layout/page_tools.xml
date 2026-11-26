@@ -39,6 +39,34 @@
                     android:layout_marginTop="4dp"
                     android:text="Checking…" />
 
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        style="@style/TmgBody"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="KernelSU-Next" />
+
+                    <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/providerSwitch"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/providerNote"
+                    style="@style/TmgSmall"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="Off: KernelSU v3.2.5 · On: KernelSU-Next v3.4.2" />
+
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/repairButton"
                     style="@style/TmgButtonTonal"

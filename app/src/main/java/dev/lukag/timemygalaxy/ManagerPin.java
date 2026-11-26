@@ -8,8 +8,11 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Pins the KernelSU manager to 3.2.5 before a run. Best effort: failures are
+ * Pins the selected provider's manager before a run. Best effort: failures are
  * logged and the caller continues. /data/adb and modules are untouched.
+ *
+ * The other provider's manager is removed when it is installed, so the phone
+ * only ever carries the manager that matches the selected provider.
  */
 final class ManagerPin {
 
@@ -33,19 +36,8 @@ final class ManagerPin {
         }
     }
 
-    static final String PACKAGE = "me.weishu.kernelsu";
-    static final long VERSION_CODE = 32525L;
-    static final String VERSION_NAME = "v3.2.5";
-    static final String APK_URL =
-            "https://github.com/tiann/KernelSU/releases/download/v3.2.5/"
-                    + "KernelSU_v3.2.5_32525-release.apk";
-    static final String APK_SHA256 =
-            "1417081413bf7ab1de8e440ecbcb62685037c8f28f048f0f8b79e305b31ab916";
-    static final long APK_BYTES = 9_083_665L;
-    static final String APK_NAME = "KernelSU_v3.2.5_32525-release.apk";
-    static final String STAGED_APK = "/data/local/tmp/" + APK_NAME;
-
-    private static final long MAX_APK_BYTES = 16L * 1024 * 1024;
+    /** The Next apk is 16,682,167 bytes, so the cap cannot be 16 MiB any more. */
+    private static final long MAX_APK_BYTES = 32L * 1024 * 1024;
     private static final int CONNECT_TIMEOUT_MS = 15_000;
     private static final int READ_TIMEOUT_MS = 60_000;
 
@@ -58,33 +50,37 @@ final class ManagerPin {
     }
 
     /** Human-readable install state for the Tools card. */
-    static String status(Shell shell) {
-        Installed now = read(shell);
+    static String status(Shell shell, Provider provider) {
+        Installed now = read(shell, provider.packageName);
         if (now == null) {
-            return "cannot read package state";
+            return provider.label + ": cannot read package state";
         }
         if (!now.present) {
-            return "not installed";
+            return provider.label + ": not installed";
         }
         if (now.code < 0) {
-            return "installed, version unreadable";
+            return provider.label + ": installed, version unreadable";
         }
-        return now.name + " (" + now.code + ")"
-                + (now.code == VERSION_CODE ? " · pinned" : " · needs 3.2.5");
+        return provider.label + ": " + now.name + " (" + now.code + ")"
+                + (now.code == provider.versionCode
+                        ? " · pinned" : " · needs " + provider.versionName);
     }
 
-    static Result ensure(File filesDir, Shell shell, Log log) {
+    static Result ensure(File filesDir, Provider provider, Shell shell, Log log) {
         boolean swapped = false;
+        String pkg = provider.packageName;
+        String staged = "/data/local/tmp/" + provider.apkName;
         try {
-            log.line("[*] manager: checking installed KernelSU");
-            Installed now = read(shell);
+            log.line("[*] manager: checking installed " + provider.label);
+            Installed now = read(shell, pkg);
             if (now == null) {
                 log.line("[!] manager: cannot read package state; leaving it alone");
                 return new Result(false, false, "unknown");
             }
-            if (now.present && now.code == VERSION_CODE) {
-                log.line("[+] manager: " + PACKAGE + " " + now.name
+            if (now.present && now.code == provider.versionCode) {
+                log.line("[+] manager: " + pkg + " " + now.name
                         + " (" + now.code + ")");
+                removeOther(provider, shell, log);
                 return new Result(true, false, "present");
             }
             if (!now.present) {
@@ -94,28 +90,28 @@ final class ManagerPin {
                 return new Result(false, false, "unknown version");
             } else {
                 log.line("[!] manager: installed " + now.name + " (" + now.code
-                        + "), need " + VERSION_NAME + " (" + VERSION_CODE + ")");
+                        + "), need " + provider.versionName + " (" + provider.versionCode + ")");
             }
 
             File apk;
             try {
-                apk = cacheApk(filesDir, log);
+                apk = cacheApk(filesDir, provider, log);
             } catch (Throwable t) {
-                log.line("[!] manager: no usable " + VERSION_NAME + " apk: "
+                log.line("[!] manager: no usable " + provider.versionName + " apk: "
                         + message(t));
                 log.line("[i] manager: continuing with the installed manager");
                 return new Result(false, swapped, "apk unavailable");
             }
 
-            if (!stage(apk, shell, log)) {
+            if (!stage(apk, provider, shell, staged, log)) {
                 log.line("[!] manager: staging failed, continuing");
                 return new Result(false, swapped, "staging failed");
             }
 
             if (now.present) {
-                log.line("[*] manager: uninstalling " + PACKAGE);
+                log.line("[*] manager: uninstalling " + pkg);
                 String out = shell.run("timeout 60 pm uninstall --user 0 "
-                        + PACKAGE + " 2>&1", 70_000L);
+                        + pkg + " 2>&1", 70_000L);
                 if (out.contains("Success")) {
                     log.line("[+] manager: uninstalled");
                 } else {
@@ -124,33 +120,34 @@ final class ManagerPin {
                 }
             }
 
-            log.line("[*] manager: installing " + VERSION_NAME
+            log.line("[*] manager: installing " + provider.versionName
                     + " (dexopt can take a few seconds)");
-            String install = shell.run("timeout 180 pm install "
-                    + quote(STAGED_APK) + " 2>&1", 190_000L);
+            String install = shell.run("timeout 230 pm install "
+                    + quote(staged) + " 2>&1", 240_000L);
             if (!install.contains("Success")) {
                 log.line("[!] manager: install said: " + oneLine(install));
                 log.line("[i] manager: /data/adb, modules and the allowlist are untouched");
                 return new Result(false, swapped, "install failed");
             }
 
-            Installed after = read(shell);
-            if (!isPinned(after)) {
+            Installed after = read(shell, pkg);
+            if (!isPinned(after, provider)) {
                 sleep(1000);
-                after = read(shell);
+                after = read(shell, pkg);
             }
-            if (!isPinned(after)) {
-                log.line("[!] manager: installed version is not " + VERSION_CODE
+            if (!isPinned(after, provider)) {
+                log.line("[!] manager: installed version is not " + provider.versionCode
                         + ", continuing");
                 log.line("[i] manager: /data/adb, modules and the allowlist are untouched");
                 return new Result(false, swapped, "verify failed");
             }
 
             swapped = true;
-            log.line("[+] manager: installed " + VERSION_NAME + " ("
-                    + VERSION_CODE + ")");
+            log.line("[+] manager: installed " + provider.versionName + " ("
+                    + provider.versionCode + ")");
+            removeOther(provider, shell, log);
             log.line("[i] manager: /data/adb, modules and the allowlist are untouched");
-            launchOnce(shell, log);
+            launchOnce(shell, log, pkg);
             return new Result(true, true, "swapped");
         } catch (Throwable t) {
             log.line("[!] manager: step failed: " + message(t));
@@ -158,13 +155,35 @@ final class ManagerPin {
         }
     }
 
+    /**
+     * Only one manager can be usable at a time: the two packages install the
+     * same su path and module tree. Best effort, never fails the pin.
+     */
+    private static void removeOther(Provider provider, Shell shell, Log log) {
+        Provider other = provider.isNext() ? Provider.LEGACY : Provider.NEXT;
+        String path = shell.run("pm path " + other.packageName + " 2>/dev/null", 30_000L);
+        if (path == null || !path.contains("package:")) {
+            return;
+        }
+        log.line("[*] manager: removing " + other.label + " ("
+                + other.packageName + ")");
+        String out = shell.run("timeout 60 pm uninstall --user 0 "
+                + other.packageName + " 2>&1", 70_000L);
+        if (out.contains("Success")) {
+            log.line("[+] manager: removed " + other.label);
+        } else {
+            log.line("[!] manager: could not remove " + other.label + ": "
+                    + oneLine(out) + " (continuing)");
+        }
+    }
+
     /** Null means the package state cannot be read, so never uninstall. */
-    private static Installed read(Shell shell) {
-        String script = "p=$(pm path " + PACKAGE + " 2>&1); rc=$?; "
+    private static Installed read(Shell shell, String pkg) {
+        String script = "p=$(pm path " + pkg + " 2>&1); rc=$?; "
                 + "if [ -n \"$p\" ] && [ $rc -ne 0 ]; then echo __pm_error; "
                 + "elif [ -z \"$p\" ]; then echo __absent; "
                 + "else echo __present; "
-                + "dumpsys package " + PACKAGE
+                + "dumpsys package " + pkg
                 + " 2>/dev/null | grep -m2 -E 'versionCode=|versionName='; fi";
         String out = shell.run(script, 40_000L);
         if (isShellError(out) || out.contains("__pm_error")) {
@@ -188,7 +207,7 @@ final class ManagerPin {
         }
 
         String list = shell.run("timeout 20 pm list packages --show-versioncode "
-                + PACKAGE + " 2>/dev/null", 25_000L);
+                + pkg + " 2>/dev/null", 25_000L);
         if (!isShellError(list)) {
             Matcher listing = LIST_CODE.matcher(list);
             if (listing.find()) {
@@ -201,37 +220,39 @@ final class ManagerPin {
         return Installed.present(-1, label);
     }
 
-    private static boolean isPinned(Installed value) {
-        return value != null && value.present && value.code == VERSION_CODE;
+    private static boolean isPinned(Installed value, Provider provider) {
+        return value != null && value.present && value.code == provider.versionCode;
     }
 
-    private static File cacheApk(File filesDir, Log log) throws Exception {
+    private static File cacheApk(File filesDir, Provider provider, Log log) throws Exception {
         File dir = new File(filesDir, "manager");
         if (!dir.isDirectory() && !dir.mkdirs()) {
             throw new IOException("cannot create " + dir);
         }
-        File apk = new File(dir, "kernelsu-3.2.5.apk");
-        if (isVerified(apk)) {
-            log.line("[i] manager: using cached " + VERSION_NAME + " apk");
+        File apk = new File(dir, provider.id + "-" + provider.versionCode + ".apk");
+        if (isVerified(apk, provider)) {
+            log.line("[i] manager: using cached " + provider.versionName + " apk");
             return apk;
         }
         if (apk.exists() && !apk.delete()) {
             throw new IOException("cannot remove stale " + apk);
         }
-        File part = new File(dir, "kernelsu-3.2.5.apk.part");
+        File part = new File(dir, provider.id + "-" + provider.versionCode + ".apk.part");
         if (part.exists() && !part.delete()) {
             throw new IOException("cannot remove stale " + part);
         }
 
-        log.line("[*] manager: downloading " + VERSION_NAME + " apk (9.1 MiB)");
-        PayloadChannel.downloadTo(APK_URL, CONNECT_TIMEOUT_MS, READ_TIMEOUT_MS,
+        log.line("[*] manager: downloading " + provider.versionName + " apk ("
+                + String.format(java.util.Locale.US, "%.1f", provider.apkBytes / 1048576.0)
+                + " MiB)");
+        PayloadChannel.downloadTo(provider.apkUrl, CONNECT_TIMEOUT_MS, READ_TIMEOUT_MS,
                 MAX_APK_BYTES, part);
-        if (part.length() != APK_BYTES) {
-            throw new IOException("size " + part.length() + " != " + APK_BYTES);
+        if (part.length() != provider.apkBytes) {
+            throw new IOException("size " + part.length() + " != " + provider.apkBytes);
         }
         String digest = PayloadStore.digest(part);
-        if (!APK_SHA256.equalsIgnoreCase(digest)) {
-            throw new IOException("sha256 " + digest + " != " + APK_SHA256);
+        if (!provider.apkSha256.equalsIgnoreCase(digest)) {
+            throw new IOException("sha256 " + digest + " != " + provider.apkSha256);
         }
         if (!part.renameTo(apk)) {
             throw new IOException("cannot rename " + part);
@@ -240,27 +261,28 @@ final class ManagerPin {
         return apk;
     }
 
-    private static boolean isVerified(File file) {
+    private static boolean isVerified(File file, Provider provider) {
         try {
-            return file.isFile() && file.length() == APK_BYTES
-                    && APK_SHA256.equalsIgnoreCase(PayloadStore.digest(file));
+            return file.isFile() && file.length() == provider.apkBytes
+                    && provider.apkSha256.equalsIgnoreCase(PayloadStore.digest(file));
         } catch (Exception e) {
             return false;
         }
     }
 
-    private static boolean stage(File apk, Shell shell, Log log) {
+    private static boolean stage(File apk, Provider provider, Shell shell, String staged,
+            Log log) {
         try {
-            if (APK_SHA256.equalsIgnoreCase(remoteDigest(shell))) {
+            if (provider.apkSha256.equalsIgnoreCase(remoteDigest(shell, staged))) {
                 log.line("[i] manager: apk already staged");
                 return true;
             }
-            log.line("[*] manager: staging " + STAGED_APK);
+            log.line("[*] manager: staging " + staged);
             try (InputStream in = new FileInputStream(apk)) {
-                ShizukuBridge.writeFile(STAGED_APK, "644", in);
+                ShizukuBridge.writeFile(staged, "644", in);
             }
-            String after = remoteDigest(shell);
-            if (!APK_SHA256.equalsIgnoreCase(after)) {
+            String after = remoteDigest(shell, staged);
+            if (!provider.apkSha256.equalsIgnoreCase(after)) {
                 log.line("[!] manager: staged apk hash "
                         + (after.isEmpty() ? "unreadable" : after) + " does not match");
                 return false;
@@ -272,8 +294,8 @@ final class ManagerPin {
         }
     }
 
-    private static String remoteDigest(Shell shell) {
-        String out = shell.run("timeout 30 sha256sum " + quote(STAGED_APK)
+    private static String remoteDigest(Shell shell, String staged) {
+        String out = shell.run("timeout 30 sha256sum " + quote(staged)
                 + " 2>/dev/null", 35_000L);
         for (String token : out.split("\\s+")) {
             if (token.matches("[0-9a-fA-F]{64}")) {
@@ -283,9 +305,9 @@ final class ManagerPin {
         return "";
     }
 
-    private static void launchOnce(Shell shell, Log log) {
+    private static void launchOnce(Shell shell, Log log, String pkg) {
         log.line("[*] manager: launching once so the kernel learns its uid");
-        String component = resolveComponent(shell);
+        String component = resolveComponent(shell, pkg);
         boolean started = false;
         if (component != null) {
             String out = shell.run("timeout 25 am start -W -n "
@@ -293,7 +315,7 @@ final class ManagerPin {
             started = out.contains("Status: ok") || out.contains("Complete");
         }
         if (!started) {
-            String out = shell.run("timeout 25 monkey -p " + PACKAGE
+            String out = shell.run("timeout 25 monkey -p " + pkg
                     + " -c android.intent.category.LAUNCHER 1 2>&1", 30_000L);
             started = out.contains("Events injected: 1");
         }
@@ -318,10 +340,10 @@ final class ManagerPin {
         log.line("[!] manager: could not foreground the app; continuing");
     }
 
-    private static String resolveComponent(Shell shell) {
+    private static String resolveComponent(Shell shell, String pkg) {
         String out = shell.run("timeout 20 cmd package resolve-activity --brief "
                 + "-a android.intent.action.MAIN "
-                + "-c android.intent.category.LAUNCHER " + PACKAGE + " 2>/dev/null",
+                + "-c android.intent.category.LAUNCHER " + pkg + " 2>/dev/null",
                 25_000L);
         Matcher matcher = COMPONENT.matcher(out);
         String found = null;

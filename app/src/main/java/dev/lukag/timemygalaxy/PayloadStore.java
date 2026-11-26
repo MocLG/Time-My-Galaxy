@@ -1,9 +1,11 @@
 package dev.lukag.timemygalaxy;
 
+import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.List;
@@ -15,6 +17,10 @@ import java.util.Locale;
  *
  * The source directory is the verified bundle in the app's files directory,
  * populated by PayloadChannel. Nothing is bundled in the APK.
+ *
+ * Both providers stage their daemon to the same remote name, because the
+ * helper script always bind-mounts /data/local/tmp/wr/ksud. Which flavour is
+ * in that file is told to the helper by /data/local/tmp/wr/provider.
  */
 final class PayloadStore {
 
@@ -23,7 +29,10 @@ final class PayloadStore {
     }
 
     static final String REMOTE_DIR = "/data/local/tmp/wr";
+    static final String REMOTE_KSUD = REMOTE_DIR + "/ksud";
+    static final String PROVIDER_REMOTE = REMOTE_DIR + "/provider";
 
+    /** Required in every bundle, whichever provider is selected. */
     static final String[] FILES = {"wr_timerfd", "wr_exec", "ksud"};
 
     private PayloadStore() {
@@ -33,43 +42,53 @@ final class PayloadStore {
         return REMOTE_DIR + "/" + name;
     }
 
-    static boolean isStaged(File dir, String build) {
+    static File ksudFor(File dir, Provider provider) {
+        return new File(dir, provider.payloadFile);
+    }
+
+    static boolean isStaged(File dir, String build, Provider provider) {
         if (!usableBuild(build) || dir == null) {
             return false;
         }
         try {
-            for (String name : FILES) {
-                File local = new File(dir, name);
-                if (!local.isFile()) {
-                    return false;
-                }
-                if (!digest(local).equalsIgnoreCase(remoteDigest(remotePath(name)))) {
-                    return false;
-                }
+            File ksud = ksudFor(dir, provider);
+            if (!ksud.isFile()) {
+                return false;
             }
-            return true;
+            if (!digest(new File(dir, "wr_timerfd")).equalsIgnoreCase(
+                    remoteDigest(remotePath("wr_timerfd")))) {
+                return false;
+            }
+            if (!digest(new File(dir, "wr_exec")).equalsIgnoreCase(
+                    remoteDigest(remotePath("wr_exec")))) {
+                return false;
+            }
+            if (!digest(ksud).equalsIgnoreCase(remoteDigest(REMOTE_KSUD))) {
+                return false;
+            }
+            return provider.id.equals(remoteText(PROVIDER_REMOTE));
         } catch (Exception e) {
             return false;
         }
     }
 
-    static void stageAll(File dir, String build, Log log) throws Exception {
+    static void stageAll(File dir, String build, Provider provider, Log log) throws Exception {
         if (!usableBuild(build) || dir == null) {
             throw new IOException("bad payload build id: " + build);
         }
-        ensureRemoteDir();
-
-        List<String> missing = missing(dir);
+        List<String> missing = missing(dir, provider);
         if (!missing.isEmpty()) {
             throw new IOException("payload " + build + " is incomplete: missing "
                     + String.join(", ", missing));
         }
+        ensureRemoteDir();
 
         for (String name : FILES) {
-            File local = new File(dir, name);
+            File local = name.equals("ksud") ? ksudFor(dir, provider) : new File(dir, name);
             String remote = remotePath(name);
             String localDigest = digest(local);
-            log.line("[*] staging " + remote + " (" + local.length() + " bytes)");
+            log.line("[*] staging " + remote + " (" + local.length() + " bytes, "
+                    + provider.label + ")");
             try (InputStream in = new FileInputStream(local)) {
                 ShizukuBridge.writeFile(remote, "755", in);
             }
@@ -80,6 +99,20 @@ final class PayloadStore {
             }
             log.line("[+] " + remote + " sha256=" + localDigest);
         }
+
+        writeProvider(provider, log);
+    }
+
+    /** The helper reads this to pick the late-load arguments and manager package. */
+    static void writeProvider(Provider provider, Log log) throws Exception {
+        byte[] data = provider.id.getBytes(StandardCharsets.UTF_8);
+        ShizukuBridge.writeFile(PROVIDER_REMOTE, "644", new ByteArrayInputStream(data));
+        String after = remoteText(PROVIDER_REMOTE);
+        if (!provider.id.equals(after)) {
+            throw new IOException("provider marker reads '" + after + "', want '"
+                    + provider.id + "'");
+        }
+        log.line("[+] " + PROVIDER_REMOTE + " = " + provider.id);
     }
 
     static boolean usableBuild(String build) {
@@ -88,11 +121,12 @@ final class PayloadStore {
                 && build.matches("[A-Za-z0-9._-]+");
     }
 
-    private static List<String> missing(File dir) {
+    private static List<String> missing(File dir, Provider provider) {
         List<String> missing = new ArrayList<>();
         for (String name : FILES) {
-            if (!new File(dir, name).isFile()) {
-                missing.add(name);
+            File local = name.equals("ksud") ? ksudFor(dir, provider) : new File(dir, name);
+            if (!local.isFile()) {
+                missing.add(local.getName());
             }
         }
         return missing;
@@ -106,6 +140,12 @@ final class PayloadStore {
             throw new IOException("cannot create " + REMOTE_DIR
                     + (out.isEmpty() ? "" : ": " + out));
         }
+    }
+
+    private static String remoteText(String remote) throws Exception {
+        String out = ShizukuBridge.capture(new String[]{"/system/bin/sh", "-c",
+                "cat " + ShizukuBridge.shellQuote(remote)}, null, REMOTE_DIR).trim();
+        return out.startsWith("error:") ? null : out;
     }
 
     private static String remoteDigest(String remote) throws Exception {

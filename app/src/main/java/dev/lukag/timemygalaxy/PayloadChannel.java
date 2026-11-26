@@ -304,7 +304,24 @@ final class PayloadChannel {
                 throw new IOException("payload is missing " + name);
             }
         }
-        return new Manifest(json, raw, signature, build, zipName, zipSha, hashes);
+        Set<String> providers = new HashSet<>();
+        providers.add(Provider.LEGACY_ID);
+        JSONArray listed = json.optJSONArray("providers");
+        if (listed != null) {
+            for (int i = 0; i < listed.length(); i++) {
+                String id = listed.optString(i, "");
+                if (!id.isEmpty()) {
+                    providers.add(id);
+                }
+            }
+        }
+        if (providers.contains(Provider.NEXT_ID)
+                && !hashes.containsKey(Provider.NEXT.payloadFile)) {
+            throw new IOException("payload advertises " + Provider.NEXT_ID
+                    + " but is missing " + Provider.NEXT.payloadFile);
+        }
+        return new Manifest(json, raw, signature, build, zipName, zipSha, hashes,
+                providers);
     }
 
     private static Cached readCache(Context context, File dir, String build) {
@@ -627,10 +644,11 @@ final class PayloadChannel {
         final String zipName;
         final String zipSha;
         final Map<String, String> files;
+        final Set<String> providers;
         final int rev;
 
         Manifest(JSONObject json, byte[] raw, byte[] sig, String build, String zipName,
-                String zipSha, Map<String, String> files) {
+                String zipSha, Map<String, String> files, Set<String> providers) {
             this.json = json;
             this.raw = raw;
             this.sig = sig;
@@ -638,12 +656,13 @@ final class PayloadChannel {
             this.zipName = zipName;
             this.zipSha = zipSha;
             this.files = files;
+            this.providers = providers;
             this.rev = json.optInt("rev", 0);
         }
 
         Targets.Target target(File dir) {
             return new Targets.Target(build, meta("model"), meta("soc"), meta("android"),
-                    json.optBoolean("verified", false), rev, dir);
+                    json.optBoolean("verified", false), rev, dir, false, providers);
         }
 
         private String meta(String key) {

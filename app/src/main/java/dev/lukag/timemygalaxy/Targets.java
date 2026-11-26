@@ -1,6 +1,8 @@
 package dev.lukag.timemygalaxy;
 
 import java.io.File;
+import java.util.Collections;
+import java.util.Set;
 
 /**
  * One firmware build's payload metadata, taken from the signed manifest that
@@ -20,9 +22,17 @@ final class Targets {
         final boolean verified;
         final int rev;
         final File dir;
+        final boolean custom;
+        final Set<String> providers;
 
         Target(String build, String model, String soc, String android, boolean verified,
                 int rev, File dir) {
+            this(build, model, soc, android, verified, rev, dir, false,
+                    Collections.singleton(Provider.LEGACY_ID));
+        }
+
+        Target(String build, String model, String soc, String android, boolean verified,
+                int rev, File dir, boolean custom, Set<String> providers) {
             this.build = build;
             this.model = model == null || model.isEmpty() ? "unknown" : model;
             this.soc = soc;
@@ -30,6 +40,9 @@ final class Targets {
             this.verified = verified;
             this.rev = rev;
             this.dir = dir;
+            this.custom = custom;
+            this.providers = providers == null || providers.isEmpty()
+                    ? Collections.singleton(Provider.LEGACY_ID) : providers;
         }
 
         String label() {
@@ -46,6 +59,9 @@ final class Targets {
             }
             if (!verified) {
                 out.append(", untested");
+            }
+            if (custom) {
+                out.append(", custom");
             }
             return out.toString();
         }
