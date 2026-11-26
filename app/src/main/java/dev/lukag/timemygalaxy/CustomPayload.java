@@ -97,7 +97,11 @@ final class CustomPayload {
             state.put("android", flavor == null ? "" : flavor.optString("android", ""));
             state.put("flavor", provider.id);
             JSONObject files = new JSONObject();
-            for (String name : dir.list()) {
+            String[] extracted = dir.list();
+            if (extracted == null) {
+                throw new IOException("cannot list " + dir);
+            }
+            for (String name : extracted) {
                 if (ALLOWED.contains(name) && new File(dir, name).isFile()) {
                     files.put(name, PayloadStore.digest(new File(dir, name)));
                 }
