@@ -904,7 +904,7 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
                             + "Provider " + run.label + " (" + run.versionName + ").\n\n"
                             + "Stages the payload, then runs wr_timerfd as uid 2000 (Shizuku shell).\n\n"
                             + "- One plant per boot. If this boot already ran it, reboot first.\n"
-                            + "- Takes roughly 30-60 s; keep the screen on and leave the phone alone.\n"
+                            + "- Takes roughly 10-60 s. Keep the screen on and leave the phone alone.\n"
                             + "- On success the process parks forever and must not be killed.\n"
                             + "- A failed plant also needs a reboot, and either can panic the kernel.\n\n"
                             + "Run only on a device you own." + untested)
