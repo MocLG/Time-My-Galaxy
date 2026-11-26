@@ -2,7 +2,11 @@ package dev.lukag.timemygalaxy;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
@@ -24,12 +28,23 @@ final class UpdateCheck {
         final String url;
         final long checkedAt;
         final String error;
+        final String apkUrl;
+        final String apkSha;
+        final String apkName;
 
         Latest(String tag, String url, long checkedAt, String error) {
+            this(tag, url, checkedAt, error, null, null, null);
+        }
+
+        Latest(String tag, String url, long checkedAt, String error,
+                String apkUrl, String apkSha, String apkName) {
             this.tag = tag;
             this.url = url;
             this.checkedAt = checkedAt;
             this.error = error;
+            this.apkUrl = apkUrl;
+            this.apkSha = apkSha;
+            this.apkName = apkName;
         }
     }
 
@@ -37,6 +52,7 @@ final class UpdateCheck {
             "https://api.github.com/repos/MocLG/Time-My-Galaxy/releases/latest";
     private static final String PREFS = "update";
     private static final long CACHE_MS = 24 * 60 * 60 * 1000L;
+    private static final long AUTO_MS = 12 * 60 * 60 * 1000L;
     private static final int MAX_BYTES = 256 * 1024;
 
     private UpdateCheck() {
@@ -50,7 +66,67 @@ final class UpdateCheck {
         if (tag == null) {
             return null;
         }
-        return new Latest(tag, url, at, null);
+        return new Latest(tag, url, at, null,
+                prefs.getString("apk", null),
+                prefs.getString("apkSha", null),
+                prefs.getString("apkName", null));
+    }
+
+    static boolean autoEnabled(Context context) {
+        return prefs(context).getBoolean("auto", true);
+    }
+
+    static void setAutoEnabled(Context context, boolean enabled) {
+        prefs(context).edit().putBoolean("auto", enabled).apply();
+    }
+
+    static String offeredTag(Context context) {
+        return prefs(context).getString("offered", null);
+    }
+
+    static void markOffered(Context context, String tag) {
+        prefs(context).edit().putString("offered", tag).apply();
+    }
+
+    static void clearOffered(Context context) {
+        prefs(context).edit().remove("offered").apply();
+    }
+
+    /**
+     * One automatic attempt per 12 h, only while a network is available, so an
+     * app opened often does not hit GitHub on every launch. A failed attempt
+     * still counts, so a blocked network is retried on the next interval.
+     */
+    static Latest auto(Context context, Log log) {
+        Latest cached = cached(context);
+        if (!autoEnabled(context) || !online(context)) {
+            return cached;
+        }
+        long now = System.currentTimeMillis();
+        if (now - prefs(context).getLong("attempt", 0) < AUTO_MS) {
+            return cached;
+        }
+        prefs(context).edit().putLong("attempt", now).apply();
+        return check(context, true, log);
+    }
+
+    private static boolean online(Context context) {
+        ConnectivityManager manager =
+                (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (manager == null) {
+            return false;
+        }
+        Network network = manager.getActiveNetwork();
+        if (network == null) {
+            return false;
+        }
+        NetworkCapabilities caps = manager.getNetworkCapabilities(network);
+        return caps != null
+                && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
+    }
+
+    private static SharedPreferences prefs(Context context) {
+        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
 
     static Latest check(Context context, boolean force, Log log) {
@@ -65,16 +141,42 @@ final class UpdateCheck {
             if (tag.isEmpty()) {
                 throw new java.io.IOException("release has no tag");
             }
+            String apkUrl = null;
+            String apkSha = null;
+            String apkName = null;
+            JSONArray assets = json.optJSONArray("assets");
+            for (int i = 0; assets != null && i < assets.length(); i++) {
+                JSONObject asset = assets.optJSONObject(i);
+                if (asset == null) {
+                    continue;
+                }
+                String name = asset.optString("name", "");
+                String download = asset.optString("browser_download_url", "");
+                if (!name.toLowerCase(java.util.Locale.ROOT).endsWith(".apk")
+                        || download.isEmpty()) {
+                    continue;
+                }
+                apkName = name;
+                apkUrl = download;
+                String digest = asset.optString("digest", "");
+                if (digest.startsWith("sha256:")) {
+                    apkSha = digest.substring(7);
+                }
+                break;
+            }
             long now = System.currentTimeMillis();
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
                     .putString("tag", tag)
                     .putString("url", url)
+                    .putString("apk", apkUrl)
+                    .putString("apkSha", apkSha)
+                    .putString("apkName", apkName)
                     .putLong("at", now)
                     .apply();
             if (log != null) {
                 log.line("[+] latest release " + tag);
             }
-            return new Latest(tag, url, now, null);
+            return new Latest(tag, url, now, null, apkUrl, apkSha, apkName);
         } catch (Throwable t) {
             if (log != null && force) {
                 log.line("[i] update check unavailable: " + message(t));

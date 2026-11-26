@@ -125,8 +125,10 @@ payload, checked for structure and file hashes, and deleted after the run.
 and the current build, and falls back to the running build offline. Tap a row
 to copy its build id.
 
-**Dark mode** and the update check are on Tools. The header links the version,
-commit, and any newer release.
+**Dark mode** and the update check are on Tools. The check runs when the app
+opens, at most every 12 hours and only while online, and installs a newer
+release through root or Shizuku without an app dialog. The header links the
+version, commit, and any newer release.
 
 ## Process lifetime
 

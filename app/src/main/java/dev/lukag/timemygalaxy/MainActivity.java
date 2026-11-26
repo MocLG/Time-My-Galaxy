@@ -113,6 +113,7 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
     private Button softRebootButton;
     private Button diagnosticsButton;
     private Button updateButton;
+    private MaterialSwitch autoUpdateSwitch;
     private Button repoButton;
     private EditText commandInput;
     private Button commandButton;
@@ -178,6 +179,7 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
         appendLog("Transport: Shizuku shell (uid 2000)\n\n");
         refreshStatus();
         refreshVersionLine();
+        maybeAutoCheck();
         resolvePayload(this::initialResolved);
         ui.postDelayed(this::autoRequestShizuku, 600);
     }
@@ -344,6 +346,14 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
         softRebootButton.setOnClickListener(v -> confirmSoftReboot());
         diagnosticsButton.setOnClickListener(v -> confirmDiagnostics());
         updateButton.setOnClickListener(v -> checkNow());
+        autoUpdateSwitch = view.findViewById(R.id.autoUpdateSwitch);
+        autoUpdateSwitch.setChecked(UpdateCheck.autoEnabled(this));
+        autoUpdateSwitch.setOnCheckedChangeListener((button, checked) -> {
+            UpdateCheck.setAutoEnabled(this, checked);
+            if (checked) {
+                maybeAutoCheck();
+            }
+        });
         repoButton.setOnClickListener(v -> openUrl(BuildConfig.REPO_URL));
         commandButton.setOnClickListener(v -> runRootCommand());
         checkButton.setOnClickListener(v -> runChecksNow());
@@ -465,7 +475,7 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
             copyButton.setEnabled(logBuffer.length() > 0);
         }
         setEnabled(!busy.get(), repairButton, buildsButton, systemUiButton, softRebootButton,
-                diagnosticsButton, updateButton, repoButton);
+                diagnosticsButton, updateButton, repoButton, autoUpdateSwitch);
         if (commandButton != null) {
             commandButton.setEnabled(!busy.get() && granted);
             checkButton.setEnabled(!busy.get() && granted);
@@ -600,6 +610,53 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
                 });
             }
         });
+    }
+
+    /** Silent check on open, at most once per 12 h and only while online. */
+    private void maybeAutoCheck() {
+        executor.execute(() -> {
+            UpdateCheck.Latest latest = UpdateCheck.auto(this,
+                    text -> appendLog(text + "\n"));
+            ui.post(() -> {
+                refreshUpdateStatus();
+                refreshVersionLine();
+            });
+            autoUpdate(latest);
+        });
+    }
+
+    /** Downloads a newer release and installs it without an app dialog. */
+    private void autoUpdate(UpdateCheck.Latest latest) {
+        if (latest == null || !UpdateCheck.isNewer(latest.tag)
+                || latest.tag.equals(UpdateCheck.offeredTag(this))) {
+            return;
+        }
+        if (busy.get()) {
+            appendLog("[i] update " + latest.tag + " waits for this run to finish\n");
+            return;
+        }
+        if (!ShizukuBridge.isGranted()) {
+            appendLog("[i] update " + latest.tag + " installs when Shizuku is ready\n");
+            return;
+        }
+        File apk;
+        try {
+            apk = UpdateInstall.download(this, latest, text -> appendLog(text + "\n"));
+        } catch (Throwable t) {
+            appendLog("[!] update download failed: " + message(t) + "\n");
+            return;
+        }
+        if (busy.get()) {
+            appendLog("[i] update " + latest.tag + " is ready for the next open\n");
+            return;
+        }
+        UpdateCheck.markOffered(this, latest.tag);
+        if (UpdateInstall.install(apk, text -> appendLog(text + "\n"))) {
+            appendLog("[+] update " + latest.tag + " installed\n");
+            return;
+        }
+        UpdateCheck.clearOffered(this);
+        appendLog("[!] update " + latest.tag + " not installed; retrying on a later open\n");
     }
 
     private void initialResolved() {
