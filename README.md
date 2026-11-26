@@ -112,8 +112,9 @@ other one.
 
 **Authorize download mode** sets the DMC authorization byte that the bootloader
 reads before it accepts Odin. It helps on firmware where Download Mode answers
-with the D2 screen while a screen lock is set. Samsung clears the byte during
-Android startup, so authorize again before each attempt. The write needs root
+with the D2 screen while a screen lock is set. When it succeeds, power the phone
+off and go straight to Download Mode, because Android restores the original bytes
+while it starts. Authorize again before each attempt. The write needs root
 and goes through the vendor's own vaultkeeper service, and only that one byte
 changes. This is an undocumented Samsung interface: it may not work on every
 firmware, and it does not unlock the bootloader.

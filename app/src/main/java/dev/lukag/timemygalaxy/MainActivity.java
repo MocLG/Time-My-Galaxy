@@ -564,8 +564,12 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
                 .setTitle("Authorize download mode?")
                 .setMessage("Sets the DMC authorization byte in Samsung's vault so the "
                         + "bootloader does not answer Download Mode with the D2 error.\n\n"
-                        + "Samsung clears the byte during Android startup, so authorize "
-                        + "again before each Download Mode attempt. Only that byte changes.\n\n"
+                        + "When it succeeds, power the phone off and go straight to "
+                        + "Download Mode. Android restores the original bytes while it "
+                        + "starts, so holding off the reboot keeps the authorization. "
+                        + "Authorize again before each attempt.\n\n"
+                        + "Only that one byte changes, so the worst case is Download Mode "
+                        + "still refusing. Nothing else in the record is touched.\n\n"
                         + "This is an undocumented Samsung interface. It may not work on "
                         + "every firmware, and it does not unlock the bootloader.")
                 .setNegativeButton("Cancel", null)
@@ -584,6 +588,9 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
                 DownloadMode.Status status = DownloadMode.authorize(this);
                 appendLog((status.authorized() ? "[+] " : "[!] ")
                         + "download mode: " + status.text() + "\n");
+                if (status.authorized()) {
+                    appendLog("[*] power off, then go straight to Download Mode\n");
+                }
                 ui.post(() -> {
                     if (downloadStatus != null) {
                         downloadStatus.setText(status.text());

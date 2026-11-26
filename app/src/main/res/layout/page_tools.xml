@@ -144,7 +144,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="2dp"
-                    android:text="D2 blocks Odin when a screen lock is set. Samsung clears the flag during Android startup, so authorize again before each Download Mode attempt." />
+                    android:text="D2 blocks Odin when a screen lock is set. After authorizing, power off and go straight to Download Mode. Android startup restores the original bytes, so authorize again before each attempt." />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/downloadButton"
