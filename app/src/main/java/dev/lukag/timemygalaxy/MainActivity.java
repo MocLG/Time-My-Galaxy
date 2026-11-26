@@ -448,6 +448,7 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
         }
         if (customClearButton != null) {
             customClearButton.setVisibility(customTarget == null ? View.GONE : View.VISIBLE);
+            customClearButton.setEnabled(!busy.get());
         }
         if (customButton != null) {
             customButton.setEnabled(!busy.get());
@@ -614,6 +615,9 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
 
     /** Silent check on open, at most once per 12 h and only while online. */
     private void maybeAutoCheck() {
+        if (!UpdateCheck.autoEnabled(this)) {
+            return;
+        }
         executor.execute(() -> {
             UpdateCheck.Latest latest = UpdateCheck.auto(this,
                     text -> appendLog(text + "\n"));
@@ -627,6 +631,9 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
 
     /** Downloads a newer release and installs it without an app dialog. */
     private void autoUpdate(UpdateCheck.Latest latest) {
+        if (!UpdateCheck.autoEnabled(this)) {
+            return;
+        }
         if (latest == null || !UpdateCheck.isNewer(latest.tag)
                 || latest.tag.equals(UpdateCheck.offeredTag(this))) {
             return;
@@ -841,6 +848,10 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
         if (customTarget == null) {
             return;
         }
+        if (busy.get()) {
+            appendLog("[!] cannot clear the custom payload during a run\n");
+            return;
+        }
         new MaterialAlertDialogBuilder(this)
                 .setTitle("Discard the custom payload?")
                 .setMessage("Deletes the extracted bundle from app storage and goes back "
@@ -851,6 +862,9 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
     }
 
     private void clearCustom() {
+        if (busy.get()) {
+            return;
+        }
         CustomPayload.clear(this);
         customTarget = null;
         customProvider = null;
