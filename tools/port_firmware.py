@@ -855,8 +855,17 @@ def derive(elf: Elf, symbols: dict[str, tuple[int, str]], funcs: list[tuple[int,
     add("TIMER_SITE_LOW16", timer_site & 0xFFFF, "STATIC_TIMER_SITE & 0xffff")
     cred_site = ret_after_first_bl(elf, symbols, funcs, "prepare_ro_creds", alloc)
     add("CRED_RO_SITE_LOW21", cred_site & 0x1FFFFF, "return address of first bl kmem_cache_alloc in prepare_ro_creds & 0x1fffff")
-    task_site = ret_after_first_bl(elf, symbols, funcs, "dup_task_struct", alloc_node)
-    add("COPY_PROCESS_LOW16", task_site & 0xFFFF, "return address of first bl kmem_cache_alloc_node in dup_task_struct & 0xffff")
+    # dup_task_struct is a separate symbol on most builds. LTO kernels inline
+    # it into copy_process, where its task_struct allocation remains the first
+    # kmem_cache_alloc_node call.
+    if "dup_task_struct" in symbols:
+        task_func = "dup_task_struct"
+    else:
+        task_func = "copy_process"
+        warn("dup_task_struct is inlined; using the first kmem_cache_alloc_node call in copy_process")
+    task_site = ret_after_first_bl(elf, symbols, funcs, task_func, alloc_node)
+    add("COPY_PROCESS_LOW16", task_site & 0xFFFF,
+        f"return address of first bl kmem_cache_alloc_node in {task_func} & 0xffff")
 
     # Struct sizes / member offsets from BTF.
     add("TIMER_ALLOC", btf_size("k_itimer"), "sizeof(struct k_itimer)")
