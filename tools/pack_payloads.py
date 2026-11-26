@@ -5,6 +5,7 @@ Inputs (all tracked in the repository):
 
     payloads/<BUILD>/profile.json   porter output for that firmware
     payloads/ksud-<KERNEL>          KernelSU helper for that kernel release
+    payloads/ksud-next-<KERNEL>     optional KernelSU-Next helper for it
 
 Built binaries (from exploit/build.sh):
 
@@ -32,8 +33,8 @@ import tempfile
 import time
 import zipfile
 
-FILES = ("wr_timerfd", "wr_exec", "ksud", "profile.json")
-EXECUTABLE = {"wr_timerfd", "wr_exec", "ksud"}
+CORE = ("wr_timerfd", "wr_exec", "ksud", "profile.json")
+EXECUTABLE = {"wr_timerfd", "wr_exec", "ksud", "ksud-next"}
 SCHEMA = 1
 
 
@@ -62,11 +63,11 @@ def sign(key, data, destination):
         )
 
 
-def write_zip(destination, entries):
+def write_zip(destination, entries, names):
     # Fixed timestamps and modes keep the archive reproducible for identical
     # inputs, so an unchanged build does not change its hash.
     with zipfile.ZipFile(destination, "w", zipfile.ZIP_DEFLATED) as archive:
-        for name in FILES:
+        for name in names:
             info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
             info.compress_type = zipfile.ZIP_DEFLATED
             mode = 0o755 if name in EXECUTABLE else 0o644
@@ -127,9 +128,18 @@ def main():
             if not os.path.isfile(path):
                 sys.exit(f"{build}: missing {name} at {path}")
 
+        # A Next helper makes the bundle serve both providers.
+        names = list(CORE)
+        providers = ["kernelsu"]
+        next_ksud = os.path.join(root, "payloads", f"ksud-next-{release}")
+        if os.path.isfile(next_ksud):
+            entries["ksud-next"] = next_ksud
+            names.append("ksud-next")
+            providers.append("kernelsu-next")
+
         zip_name = f"payload-{build}.zip"
         zip_path = os.path.join(out, zip_name)
-        write_zip(zip_path, entries)
+        write_zip(zip_path, entries, names)
 
         manifest = {
             "schema": SCHEMA,
@@ -142,7 +152,8 @@ def main():
             "generated": generated,
             "zip": zip_name,
             "sha256": sha256_file(zip_path),
-            "files": {name: sha256_file(entries[name]) for name in FILES},
+            "providers": providers,
+            "files": {name: sha256_file(entries[name]) for name in names},
         }
         raw = (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode("utf-8")
         json_path = os.path.join(out, f"{build}.json")
