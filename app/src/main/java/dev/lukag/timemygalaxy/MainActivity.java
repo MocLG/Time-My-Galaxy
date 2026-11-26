@@ -67,6 +67,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class MainActivity extends AppCompatActivity implements PayloadStore.Log {
 
     private static final int REQUEST_SHIZUKU = 0x5752;
+    private static final int REQUEST_CUSTOM_ZIP = 0x5753;
     private static final String SHELL_PATH =
             "/product/bin:/apex/com.android.runtime/bin:/apex/com.android.art/bin:"
                     + "/apex/com.android.virt/bin:/system_ext/bin:/system/bin:/system/xbin:"
@@ -121,6 +122,9 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
     private MaterialSwitch darkSwitch;
     private MaterialSwitch providerSwitch;
     private TextView providerNote;
+    private Button customButton;
+    private Button customClearButton;
+    private TextView customStatus;
 
     private LinearLayout historyList;
     private TextView historyEmpty;
@@ -129,6 +133,9 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
     private volatile Process tailProcess;
     private volatile String exploitPid;
     private volatile Targets.Target target;
+    private volatile Targets.Target downloadedTarget;
+    private volatile Targets.Target customTarget;
+    private volatile Provider customProvider;
     private volatile String payloadError;
     private DeviceGate.Result gateResult;
 
@@ -161,6 +168,12 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
         applyInsets();
         gateResult = DeviceGate.check(null);
         target = null;
+        if (RunStore.blockReason(this) != null) {
+            // A plant this boot already consumed the one-shot custom bundle.
+            CustomPayload.clear(this);
+        } else {
+            restoreCustom();
+        }
 
         appendLog("Time-My-Galaxy\n");
         appendLog("Transport: Shizuku shell (uid 2000)\n\n");
@@ -291,6 +304,9 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
         logView = view.findViewById(R.id.logView);
         runButton = view.findViewById(R.id.runButton);
         copyButton = view.findViewById(R.id.copyButton);
+        customButton = view.findViewById(R.id.customButton);
+        customClearButton = view.findViewById(R.id.customClearButton);
+        customStatus = view.findViewById(R.id.customStatus);
 
         logView.setTextColor(ansiDefaultColor);
         logScroll.setOnScrollChangeListener((v, x, y, oldX, oldY) -> followLogs = isLogAtBottom());
@@ -298,6 +314,8 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
         buildChip.setOnClickListener(v -> refetchPayload());
         runButton.setOnClickListener(v -> confirmRun());
         copyButton.setOnClickListener(v -> copyLog());
+        customButton.setOnClickListener(v -> pickCustomZip());
+        customClearButton.setOnClickListener(v -> confirmClearCustom());
         renderLogNow();
         refreshStatus();
     }
@@ -412,8 +430,20 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
         }
         if (buildChip != null) {
             buildChip.setText(hasPayload
-                    ? "● " + target.build + (target.verified ? "" : " · untested")
+                    ? "● " + target.build + (target.custom ? " · custom"
+                            : target.verified ? "" : " · untested")
                     : "● No payload");
+        }
+        Provider custom = customProvider;
+        if (customStatus != null) {
+            customStatus.setText(customTarget == null || custom == null ? ""
+                    : "Custom: " + customTarget.build + " · " + custom.versionName);
+        }
+        if (customClearButton != null) {
+            customClearButton.setVisibility(customTarget == null ? View.GONE : View.VISIBLE);
+        }
+        if (customButton != null) {
+            customButton.setEnabled(!busy.get());
         }
         if (providerSwitch != null) {
             providerSwitch.setEnabled(!busy.get());
@@ -625,14 +655,16 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
     private void applyPayload(PayloadChannel.Resolution resolution) {
         payloadError = resolution.error;
         if (resolution.ok()) {
-            target = resolution.target;
-            appendLog("[+] payload " + target.build + " (" + target.describe() + "), "
-                    + resolution.note + "\n");
+            downloadedTarget = resolution.target;
+            appendLog("[+] payload " + downloadedTarget.build + " ("
+                    + downloadedTarget.describe() + "), " + resolution.note + "\n");
         } else {
-            target = null;
+            downloadedTarget = null;
             appendLog("[-] no payload: "
                     + (resolution.error == null ? "unknown error" : resolution.error) + "\n");
         }
+        // A custom bundle stays in front of a background refresh.
+        target = customTarget != null ? customTarget : downloadedTarget;
         gateResult = DeviceGate.check(target);
         refreshStatus();
         refreshDeviceInfo();
@@ -655,7 +687,127 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
     }
 
     private Provider activeProvider() {
-        return Provider.selected(this);
+        Provider custom = customProvider;
+        return custom != null ? custom : Provider.selected(this);
+    }
+
+    private void pickCustomZip() {
+        if (busy.get()) {
+            return;
+        }
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT)
+                .addCategory(Intent.CATEGORY_OPENABLE)
+                .setType("*/*")
+                .putExtra(Intent.EXTRA_MIME_TYPES,
+                        new String[]{"application/zip", "application/octet-stream"});
+        try {
+            startActivityForResult(intent, REQUEST_CUSTOM_ZIP);
+        } catch (Throwable t) {
+            appendLog("[-] custom: no file picker: " + message(t) + "\n");
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQUEST_CUSTOM_ZIP || resultCode != RESULT_OK || data == null) {
+            return;
+        }
+        loadCustom(data.getData());
+    }
+
+    private void loadCustom(Uri uri) {
+        if (busy.get()) {
+            return;
+        }
+        executor.execute(() -> {
+            setBusy(true);
+            try {
+                appendLog("[*] custom: reading the selected zip\n");
+                CustomPayload.Loaded loaded = CustomPayload.load(this, uri);
+                ui.post(() -> {
+                    customTarget = loaded.target;
+                    customProvider = loaded.provider;
+                    target = loaded.target;
+                    Provider.select(this, loaded.provider);
+                    if (providerSwitch != null) {
+                        providerSync = true;
+                        providerSwitch.setChecked(loaded.provider == Provider.NEXT);
+                        providerSync = false;
+                    }
+                    gateResult = DeviceGate.check(target);
+                    appendLog("[+] custom: " + CustomPayload.describe(loaded) + "\n");
+                    refreshStatus();
+                    refreshDeviceInfo();
+                    showCustomLoadedDialog(loaded);
+                });
+            } catch (Throwable t) {
+                appendLog("[-] custom: " + message(t) + "\n");
+                ui.post(() -> new MaterialAlertDialogBuilder(this)
+                        .setTitle("Custom payload rejected")
+                        .setMessage(message(t))
+                        .setPositiveButton("OK", null)
+                        .show());
+            } finally {
+                setBusy(false);
+            }
+        });
+    }
+
+    private void restoreCustom() {
+        executor.execute(() -> {
+            CustomPayload.Loaded loaded = CustomPayload.current(this);
+            if (loaded == null) {
+                return;
+            }
+            ui.post(() -> {
+                customTarget = loaded.target;
+                customProvider = loaded.provider;
+                target = loaded.target;
+                appendLog("[i] custom: restored " + loaded.target.build + " ("
+                        + loaded.provider.versionName + ")\n");
+                refreshStatus();
+                refreshDeviceInfo();
+            });
+        });
+    }
+
+    private void showCustomLoadedDialog(CustomPayload.Loaded loaded) {
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("Custom payload loaded")
+                .setMessage(loaded.target.label() + "\n" + CustomPayload.describe(loaded)
+                        + "\n\nIt is used for one plant and then deleted. Nothing about "
+                        + "it is verified: a kernel that does not match this firmware "
+                        + "can panic the phone.")
+                .setPositiveButton("OK", null)
+                .show();
+    }
+
+    private void confirmClearCustom() {
+        if (customTarget == null) {
+            return;
+        }
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("Discard the custom payload?")
+                .setMessage("Deletes the extracted bundle from app storage and goes back "
+                        + "to the downloaded payload for this firmware.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Discard", (d, w) -> clearCustom())
+                .show();
+    }
+
+    private void clearCustom() {
+        CustomPayload.clear(this);
+        customTarget = null;
+        customProvider = null;
+        target = downloadedTarget;
+        gateResult = DeviceGate.check(target);
+        appendLog("[i] custom: cleared\n");
+        refreshStatus();
+        refreshDeviceInfo();
+        if (target == null) {
+            resolvePayload(null);
+        }
     }
 
     private void requestShizuku() {
@@ -743,8 +895,13 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
             String untested = current.verified ? "" : "\n\n"
                     + "WARNING: payload " + current.build + " is NOT verified on this "
                     + "firmware. An untested build can panic the kernel.";
+            if (current.custom) {
+                untested += "\n\nThis bundle was supplied by you, not the signed channel. "
+                        + "It runs once and is then deleted.";
+            }
             new MaterialAlertDialogBuilder(this)
-                    .setTitle(current.verified ? "Run the exploit?"
+                    .setTitle(current.custom ? "Run the custom payload?"
+                            : current.verified ? "Run the exploit?"
                             : "Run the UNTESTED exploit?")
                     .setMessage("Target " + current.build + " (" + current.describe() + ").\n\n"
                             + "Provider " + run.label + " (" + run.versionName + ").\n\n"
@@ -801,7 +958,7 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
                     outcome = "blocked";
                     return;
                 }
-                RunService.start(this, current.build);
+                RunService.start(this, current.build + (current.custom ? " (custom)" : ""));
                 RunService.update("Staging payload " + current.build);
 
                 appendLog("[*] staging payload " + current.build + " (" + run.label
@@ -866,7 +1023,8 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
                         + " ./wr_timerfd >> " + quote(RUN_LOG)
                         + " 2>&1 < /dev/null & fi";
                 appendLog("[*] planting wr_timerfd detached from Shizuku\n");
-                record = RunStore.begin(this, current.build, current.verified, current.rev);
+                record = RunStore.begin(this, current.build, current.verified, current.rev,
+                        current.custom);
                 RunStore.markPlanted(this, current.build);
                 planted = true;
                 RunService.update("Planting wr_timerfd");
@@ -1042,6 +1200,12 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
                 if (planted && record != null) {
                     RunStore.finish(this, record, outcome, detail, ksuReady, swapped);
                     ui.post(this::rebuildHistory);
+                }
+                if (planted && customTarget != null) {
+                    CustomPayload.clear(this);
+                    customTarget = null;
+                    customProvider = null;
+                    ui.post(() -> resolvePayload(null));
                 }
                 RunService.stop(this);
                 setBusy(false);
@@ -1304,6 +1468,10 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
         Provider provider = activeProvider();
         out.append("provider ").append(provider.label).append(' ')
                 .append(provider.versionName).append('\n');
+        if (customTarget != null) {
+            out.append("custom ").append(customTarget.build).append(' ')
+                    .append(provider.id).append('\n');
+        }
         out.append("ledger ")
                 .append(RunStore.blockReason(this) == null ? "clear" : "blocked this boot")
                 .append('\n');
