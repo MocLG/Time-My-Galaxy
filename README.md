@@ -61,7 +61,10 @@ Supported builds:
 - `S721WVLUEEZIF`
 
 Each build has a porter-generated `payloads/<BUILD>/profile.json`, and its
-kernel release needs a `payloads/ksud-<release>` helper. The app downloads only
+kernel release needs a `payloads/ksud-<release>` helper. A
+`payloads/ksud-next-<release>` helper adds the KernelSU-Next provider to the
+same release. The packer keys both helpers by kernel release, so one file
+covers every build with the same kernel. The app downloads only
 the manifest and bundle for the running build, verifies the signature and file
 hashes, and stores them in app-private storage. If the server is unreachable,
 the last saved bundle is verified again and used, so the first run needs
@@ -98,9 +101,21 @@ kernel is not rebooted and root stays loaded.
 log to one uncapped text file and opens the share sheet. It works without root
 and adds root-only files when `su` is available.
 
-**Repair manager** pins the KernelSU manager to 3.2.5 from a hash-checked APK
-and leaves `/data/adb` alone. The pin also runs before an exploit but never
-blocks it.
+**Repair manager** pins the manager for the selected provider, either KernelSU
+3.2.5 or KernelSU-Next 3.4.2, from a hash-checked APK and leaves `/data/adb`
+alone. The pin also runs before an exploit but never blocks it. Switching
+provider removes the other manager, so the next plant needs a reboot.
+
+**KernelSU-Next** on Tools selects the provider. The choice decides which
+`ksud` is staged, which late-load arguments the helper passes, and which
+manager is pinned. The switch is available only when the bundle for the
+running build carries `ksud-next`.
+
+**Load custom zip** runs a bundle you supply instead of the downloaded one, for
+one plant. The zip may contain `wr_timerfd`, `wr_exec`, one of `ksud` /
+`ksud-next`, and optionally `tmg.json` (`{"build": "...", "flavor":
+"kernelsu" | "kernelsu-next"}`). It is staged like a normal payload, checked
+only for structure and hashes, and deleted after the plant.
 
 **Supported builds** lists the signed index, marks verified or untested builds
 and the current build, and falls back to the running build offline. Tap a row
@@ -116,6 +131,9 @@ Shizuku, or force-stopping it. It is still killable by `SIGKILL`, root, LMKD,
 or reboot. Because a killed parked run would panic the kernel, after `done`
 the app clears `panic_on_oops` and sets `oom_score_adj` to `-1000`. There is no
 kill button: reboot is the only safe cleanup, and each boot allows one plant.
+
+A successful plant parks because the fake pipe page it installed must stay
+mapped.
 
 ## Reporting bugs
 
