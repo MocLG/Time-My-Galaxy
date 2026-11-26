@@ -77,7 +77,6 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
     private static final int LOG_LIMIT = 150_000;
     private static final String UI_PREFS = "wroot-ui";
     private static final String PREF_DARK = "dark";
-    private static final String PREF_PAGE = "page";
     private static final String LOAD_LOG = PayloadStore.REMOTE_DIR + "/wr_load.log";
     private static final String EXEC_LOG = PayloadStore.REMOTE_DIR + "/wr_exec.log";
     private static final String RUN_LOG = PayloadStore.REMOTE_DIR + "/run.log";
@@ -164,7 +163,7 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
         WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
         setContentView(R.layout.activity_main);
 
-        bindChrome();
+        bindChrome(savedInstanceState == null);
         applyInsets();
         gateResult = DeviceGate.check(null);
         target = null;
@@ -207,7 +206,7 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
         requestShizuku();
     }
 
-    private void bindChrome() {
+    private void bindChrome(boolean fresh) {
         pager = findViewById(R.id.pager);
         bottomNav = findViewById(R.id.bottomNav);
         versionLine = findViewById(R.id.versionLine);
@@ -217,8 +216,6 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
             @Override
             public void onPageSelected(int position) {
                 bottomNav.getMenu().getItem(position).setChecked(true);
-                getSharedPreferences(UI_PREFS, MODE_PRIVATE).edit()
-                        .putInt(PREF_PAGE, position).apply();
                 if (position == 1) {
                     refreshManagerStatus();
                     refreshDeviceInfo();
@@ -236,10 +233,10 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
             }
             return true;
         });
-        int saved = getSharedPreferences(UI_PREFS, MODE_PRIVATE).getInt(PREF_PAGE, 0);
-        bottomNav.getMenu().getItem(saved).setChecked(true);
-        if (saved > 0) {
-            pager.setCurrentItem(saved, false);
+        // A cold start always lands on Exploit; a recreate keeps its page.
+        bottomNav.getMenu().getItem(0).setChecked(true);
+        if (fresh) {
+            pager.setCurrentItem(0, false);
         }
         pager.post(this::refreshStatus);
     }
