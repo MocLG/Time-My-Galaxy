@@ -110,6 +110,14 @@ alone. The pin also runs before an exploit but never blocks it. Switching
 provider changes which manager the next run installs, and that run removes the
 other one.
 
+**Authorize download mode** sets the DMC authorization byte that the bootloader
+reads before it accepts Odin. It helps on firmware where Download Mode answers
+with the D2 screen while a screen lock is set. Samsung clears the byte during
+Android startup, so authorize again before each attempt. The write needs root
+and goes through the vendor's own vaultkeeper service, and only that one byte
+changes. This is an undocumented Samsung interface: it may not work on every
+firmware, and it does not unlock the bootloader.
+
 **KernelSU-Next** on Tools selects the provider. The choice decides which
 `ksud` is staged, which late-load arguments the helper passes, and which
 manager is pinned. The switch is available only when the bundle for the

@@ -86,6 +86,7 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final AtomicBoolean busy = new AtomicBoolean();
+    private final AtomicBoolean d2Reading = new AtomicBoolean();
     private final StringBuilder logBuffer = new StringBuilder();
 
     private ViewPager2 pager;
@@ -112,6 +113,8 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
     private Button systemUiButton;
     private Button softRebootButton;
     private Button diagnosticsButton;
+    private Button downloadButton;
+    private TextView downloadStatus;
     private Button updateButton;
     private MaterialSwitch autoUpdateSwitch;
     private Button repoButton;
@@ -221,6 +224,7 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
                 if (position == 1) {
                     refreshManagerStatus();
                     refreshDeviceInfo();
+                    refreshDownloadMode();
                     refreshUpdateStatus();
                 } else if (position == 2) {
                     rebuildHistory();
@@ -329,6 +333,8 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
         systemUiButton = view.findViewById(R.id.systemUiButton);
         softRebootButton = view.findViewById(R.id.softRebootButton);
         diagnosticsButton = view.findViewById(R.id.diagnosticsButton);
+        downloadButton = view.findViewById(R.id.downloadButton);
+        downloadStatus = view.findViewById(R.id.downloadStatus);
         updateButton = view.findViewById(R.id.updateButton);
         repoButton = view.findViewById(R.id.repoButton);
         commandInput = view.findViewById(R.id.commandInput);
@@ -345,6 +351,7 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
         systemUiButton.setOnClickListener(v -> confirmRestartSystemUi());
         softRebootButton.setOnClickListener(v -> confirmSoftReboot());
         diagnosticsButton.setOnClickListener(v -> confirmDiagnostics());
+        downloadButton.setOnClickListener(v -> confirmDownloadMode());
         updateButton.setOnClickListener(v -> checkNow());
         autoUpdateSwitch = view.findViewById(R.id.autoUpdateSwitch);
         autoUpdateSwitch.setChecked(UpdateCheck.autoEnabled(this));
@@ -414,6 +421,9 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
         refreshManagerStatus();
         refreshDeviceInfo();
         refreshUpdateStatus();
+        if (pager != null && pager.getCurrentItem() == 1) {
+            refreshDownloadMode();
+        }
     }
 
     private void bindHistoryPage(View view) {
@@ -481,6 +491,9 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
             commandButton.setEnabled(!busy.get() && granted);
             checkButton.setEnabled(!busy.get() && granted);
         }
+        if (downloadButton != null) {
+            downloadButton.setEnabled(!busy.get() && granted);
+        }
         if (darkSwitch != null) {
             darkSwitch.setEnabled(!busy.get());
         }
@@ -520,6 +533,66 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
         if (deviceInfo != null) {
             deviceInfo.setText(BuildInfo.from(target).describe());
         }
+    }
+
+    /** Reads the DMC vault without writing anything. */
+    private void refreshDownloadMode() {
+        if (downloadStatus == null || busy.get() || !d2Reading.compareAndSet(false, true)) {
+            return;
+        }
+        downloadStatus.setText("Checking…");
+        executor.execute(() -> {
+            DownloadMode.Status status = DownloadMode.read(this);
+            d2Reading.set(false);
+            ui.post(() -> {
+                if (downloadStatus != null) {
+                    downloadStatus.setText(status.text());
+                }
+            });
+        });
+    }
+
+    private void confirmDownloadMode() {
+        if (busy.get()) {
+            return;
+        }
+        if (!ShizukuBridge.isRunning() || !ShizukuBridge.isGranted()) {
+            requestShizuku();
+            return;
+        }
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("Authorize download mode?")
+                .setMessage("Sets the DMC authorization byte in Samsung's vault so the "
+                        + "bootloader does not answer Download Mode with the D2 error.\n\n"
+                        + "Samsung clears the byte during Android startup, so authorize "
+                        + "again before each Download Mode attempt. Only that byte changes.\n\n"
+                        + "This is an undocumented Samsung interface. It may not work on "
+                        + "every firmware, and it does not unlock the bootloader.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Authorize", (dialog, which) -> applyDownloadMode())
+                .show();
+    }
+
+    private void applyDownloadMode() {
+        if (busy.get()) {
+            return;
+        }
+        executor.execute(() -> {
+            setBusy(true);
+            try {
+                appendLog("[*] download mode: requesting authorization\n");
+                DownloadMode.Status status = DownloadMode.authorize(this);
+                appendLog((status.authorized() ? "[+] " : "[!] ")
+                        + "download mode: " + status.text() + "\n");
+                ui.post(() -> {
+                    if (downloadStatus != null) {
+                        downloadStatus.setText(status.text());
+                    }
+                });
+            } finally {
+                setBusy(false);
+            }
+        });
     }
 
     private void refreshUpdateStatus() {

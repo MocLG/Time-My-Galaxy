@@ -129,6 +129,49 @@
                     style="@style/TmgSection"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
+                    android:text="Download mode" />
+
+                <TextView
+                    android:id="@+id/downloadStatus"
+                    style="@style/TmgBody"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="Not checked" />
+
+                <TextView
+                    style="@style/TmgSmall"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="D2 blocks Odin when a screen lock is set. Samsung clears the flag during Android startup, so authorize again before each Download Mode attempt." />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/downloadButton"
+                    style="@style/TmgButtonOutlined"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="Authorize download mode" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            app:cardCornerRadius="20dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="12dp">
+
+                <TextView
+                    style="@style/TmgSection"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
                     android:text="Actions" />
 
                 <com.google.android.material.button.MaterialButton
