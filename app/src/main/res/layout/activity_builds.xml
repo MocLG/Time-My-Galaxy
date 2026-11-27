@@ -12,7 +12,7 @@
         android:layout_width="match_parent"
         android:layout_height="?attr/actionBarSize"
         app:navigationIcon="?attr/homeAsUpIndicator"
-        app:title="Supported builds" />
+        app:title="@string/title_supported_builds" />
 
     <TextView
         android:id="@+id/status"
@@ -22,7 +22,7 @@
         android:paddingStart="16dp"
         android:paddingEnd="16dp"
         android:paddingBottom="8dp"
-        android:text="Loading signed index…" />
+        android:text="@string/status_loading_index" />
 
     <ScrollView
         android:layout_width="match_parent"

@@ -122,17 +122,31 @@ final class RunStore {
         }
 
         String meta() {
+            return meta(null);
+        }
+
+        String meta(Context context) {
             StringBuilder out = new StringBuilder();
             out.append(durationMs > 0 ? (durationMs / 1000) + "s" : "—");
             if (rev > 0) {
                 out.append(" · rev ").append(rev);
             }
-            out.append(" · ").append(root ? "root ok" : "no root");
-            if (swapped) {
-                out.append(" · manager swapped");
-            }
-            if (custom) {
-                out.append(" · custom");
+            if (context != null) {
+                out.append(" · ").append(context.getString(root ? R.string.run_root_ok : R.string.run_no_root));
+                if (swapped) {
+                    out.append(" · ").append(context.getString(R.string.run_manager_swapped));
+                }
+                if (custom) {
+                    out.append(" · ").append(context.getString(R.string.custom));
+                }
+            } else {
+                out.append(" · ").append(root ? "root ok" : "no root");
+                if (swapped) {
+                    out.append(" · manager swapped");
+                }
+                if (custom) {
+                    out.append(" · custom");
+                }
             }
             return out.toString();
         }
@@ -157,9 +171,7 @@ final class RunStore {
             return null;
         }
         String build = prefs.getString(KEY_BUILD, "unknown");
-        return "This boot already planted " + build + " at " + time(plantAt) + ".\n\n"
-                + "A real reboot is required before planting again. A soft reboot does not "
-                + "change the kernel boot id and does not clear this.";
+        return context.getString(R.string.run_blocked_reason, build, time(plantAt));
     }
 
     static void markPlanted(Context context, String build) {

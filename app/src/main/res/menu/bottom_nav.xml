@@ -3,13 +3,13 @@
     <item
         android:id="@+id/tab_exploit"
         android:icon="@drawable/ic_tab_exploit"
-        android:title="Exploit" />
+        android:title="@string/tab_exploit" />
     <item
         android:id="@+id/tab_tools"
         android:icon="@drawable/ic_tab_tools"
-        android:title="Tools" />
+        android:title="@string/tab_tools" />
     <item
         android:id="@+id/tab_history"
         android:icon="@drawable/ic_tab_history"
-        android:title="History" />
+        android:title="@string/tab_history" />
 </menu>

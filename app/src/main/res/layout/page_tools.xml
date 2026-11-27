@@ -29,7 +29,7 @@
                     style="@style/TmgSection"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Manager" />
+                    android:text="@string/section_manager" />
 
                 <TextView
                     android:id="@+id/managerStatus"
@@ -37,7 +37,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
-                    android:text="Checking…" />
+                    android:text="@string/status_checking" />
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -51,7 +51,7 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="KernelSU-Next" />
+                        android:text="@string/label_ksu_next" />
 
                     <com.google.android.material.materialswitch.MaterialSwitch
                         android:id="@+id/providerSwitch"
@@ -65,7 +65,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="2dp"
-                    android:text="Off: KernelSU v3.2.5 · On: KernelSU-Next v3.4.2" />
+                    android:text="@string/note_provider" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/repairButton"
@@ -73,7 +73,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="8dp"
-                    android:text="Repair manager" />
+                    android:text="@string/button_repair_manager" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
@@ -93,7 +93,7 @@
                     style="@style/TmgSection"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Device" />
+                    android:text="@string/section_device" />
 
                 <TextView
                     android:id="@+id/deviceInfo"
@@ -101,7 +101,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
-                    android:text="Reading build…" />
+                    android:text="@string/status_reading_build" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/buildsButton"
@@ -109,7 +109,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="8dp"
-                    android:text="Supported builds" />
+                    android:text="@string/button_supported_builds" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
@@ -129,7 +129,7 @@
                     style="@style/TmgSection"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Download mode" />
+                    android:text="@string/section_download_mode" />
 
                 <TextView
                     android:id="@+id/downloadStatus"
@@ -137,14 +137,14 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
-                    android:text="Not checked" />
+                    android:text="@string/status_not_checked" />
 
                 <TextView
                     style="@style/TmgSmall"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="2dp"
-                    android:text="D2 blocks Odin when a screen lock is set. After authorizing, power off and go straight to Download Mode. Android startup restores the original bytes, so authorize again before each attempt." />
+                    android:text="@string/desc_download_mode" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/downloadButton"
@@ -152,7 +152,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="8dp"
-                    android:text="Authorize download mode" />
+                    android:text="@string/button_authorize_download_mode" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
@@ -172,7 +172,7 @@
                     style="@style/TmgSection"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Actions" />
+                    android:text="@string/section_actions" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/systemUiButton"
@@ -180,7 +180,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="8dp"
-                    android:text="Restart SystemUI" />
+                    android:text="@string/button_restart_systemui" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/softRebootButton"
@@ -188,7 +188,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
-                    android:text="Soft reboot" />
+                    android:text="@string/button_soft_reboot" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/diagnosticsButton"
@@ -196,7 +196,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
-                    android:text="Export diagnostics" />
+                    android:text="@string/button_export_diagnostics" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
@@ -216,20 +216,20 @@
                     style="@style/TmgSection"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Root command" />
+                    android:text="@string/section_root_command" />
 
                 <TextView
                     style="@style/TmgSmall"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="2dp"
-                    android:text="Runs through su after the helper reports done" />
+                    android:text="@string/desc_root_command" />
 
                 <com.google.android.material.textfield.TextInputLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="8dp"
-                    android:hint="sh">
+                    android:hint="@string/hint_sh">
 
                     <com.google.android.material.textfield.TextInputEditText
                         android:id="@+id/commandInput"
@@ -254,7 +254,7 @@
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
                         android:layout_marginEnd="4dp"
-                        android:text="Run as root" />
+                        android:text="@string/button_run_as_root" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/checkButton"
@@ -263,7 +263,7 @@
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
                         android:layout_marginStart="4dp"
-                        android:text="Run checks" />
+                        android:text="@string/button_run_checks" />
                 </LinearLayout>
 
                 <TextView
@@ -299,12 +299,49 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="Dark mode" />
+                    android:text="@string/section_dark_mode" />
 
                 <com.google.android.material.materialswitch.MaterialSwitch
                     android:id="@+id/darkSwitch"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/languageCard"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            app:cardCornerRadius="20dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="12dp">
+
+                <TextView
+                    style="@style/TmgSection"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/section_language" />
+
+                <TextView
+                    android:id="@+id/languageCurrent"
+                    style="@style/TmgBody"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="@string/language_system_default" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/languageButton"
+                    style="@style/TmgButtonOutlined"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="@string/button_change_language" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
@@ -324,7 +361,7 @@
                     style="@style/TmgSection"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Update" />
+                    android:text="@string/section_update" />
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -343,13 +380,13 @@
                             style="@style/TmgBody"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:text="Check automatically" />
+                            android:text="@string/label_check_automatically" />
 
                         <TextView
                             style="@style/TmgSmall"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:text="At most every 12 hours, while online" />
+                            android:text="@string/desc_check_automatically" />
                     </LinearLayout>
 
                     <com.google.android.material.materialswitch.MaterialSwitch
@@ -364,7 +401,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
-                    android:text="Not checked yet" />
+                    android:text="@string/status_not_checked_yet" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/updateButton"
@@ -372,7 +409,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="8dp"
-                    android:text="Check now" />
+                    android:text="@string/button_check_now" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
@@ -392,7 +429,7 @@
                     style="@style/TmgSection"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="About" />
+                    android:text="@string/section_about" />
 
                 <TextView
                     android:id="@+id/aboutText"
@@ -407,7 +444,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="8dp"
-                    android:text="Open repository" />
+                    android:text="@string/button_open_repository" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 

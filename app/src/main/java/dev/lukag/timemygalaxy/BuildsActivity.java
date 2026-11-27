@@ -69,13 +69,13 @@ public class BuildsActivity extends AppCompatActivity {
             try {
                 PayloadChannel.Index index = PayloadChannel.index(this, null);
                 entries.addAll(index.builds);
-                note = "Signed index rev " + index.rev + " · " + entries.size()
-                        + " build(s)" + (index.cached ? " · saved copy" : "");
+                note = getString(R.string.builds_index_status, index.rev, entries.size(),
+                        (index.cached ? getString(R.string.builds_saved_copy) : ""));
             } catch (Throwable t) {
                 BuildInfo info = BuildInfo.from(null);
                 entries.add(new PayloadChannel.BuildEntry(current, info.model, info.soc,
                         info.android, false, 0));
-                note = "Index unavailable (" + message(t) + "), showing this build only";
+                note = getString(R.string.builds_index_unavailable, message(t));
             }
             final List<PayloadChannel.BuildEntry> rows = entries;
             final String text = note;
@@ -91,19 +91,19 @@ public class BuildsActivity extends AppCompatActivity {
             ((TextView) row.findViewById(R.id.buildName)).setText(entry.build);
             ((TextView) row.findViewById(R.id.buildDetail)).setText(entry.describe());
             TextView badge = row.findViewById(R.id.buildBadge);
-            badge.setText(entry.verified ? "verified" : "untested");
+            badge.setText(entry.verified ? R.string.verified : R.string.untested);
             badge.setTextColor(getColor(entry.verified ? R.color.tmg_good : R.color.tmg_bad));
             boolean cached = new File(getFilesDir(),
                     "payloads/" + entry.build + "/manifest.json").isFile();
             StringBuilder flags = new StringBuilder();
             if (entry.build.equals(current)) {
-                flags.append("current build");
+                flags.append(getString(R.string.build_current));
             }
             if (cached) {
-                flags.append(flags.length() > 0 ? " · " : "").append("payload cached");
+                flags.append(flags.length() > 0 ? " · " : "").append(getString(R.string.build_cached));
             }
             if (flags.length() == 0) {
-                flags.append("tap to copy the build id");
+                flags.append(getString(R.string.build_tap_to_copy));
             }
             ((TextView) row.findViewById(R.id.buildFlags)).setText(flags.toString());
             row.setOnClickListener(v -> copy(entry.build));
@@ -115,7 +115,7 @@ public class BuildsActivity extends AppCompatActivity {
         ClipboardManager clipboard = getSystemService(ClipboardManager.class);
         if (clipboard != null && build != null && !build.isEmpty()) {
             clipboard.setPrimaryClip(ClipData.newPlainText("build id", build));
-            Toast.makeText(this, build + " copied", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, getString(R.string.copied, build), Toast.LENGTH_SHORT).show();
         }
     }
 
