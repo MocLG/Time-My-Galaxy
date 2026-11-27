@@ -62,6 +62,7 @@ Supported builds:
 - `S721BXXUEEZIF`
 - `S721BXXUFEZJ6`
 - `S721WVLUEEZIF`
+- `X210XXSCEZEB`
 
 Each build has a porter-generated `payloads/<BUILD>/profile.json`, and its
 kernel release needs a `payloads/ksud-<release>` helper. A
