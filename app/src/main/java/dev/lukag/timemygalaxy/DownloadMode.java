@@ -46,23 +46,67 @@ final class DownloadMode {
         }
 
         String text() {
+            return text(null);
+        }
+
+        String text(Context context) {
+            if (context == null) {
+                switch (state) {
+                    case "unsupported":
+                        return "Not available on this firmware";
+                    case "no-vault":
+                        return "No DMC vault on this firmware";
+                    case "uid-failed":
+                        return "Could not switch to the system uid";
+                    case "read-failed":
+                        return "Could not read the vault" + errorSuffix();
+                    case "write-failed":
+                        return "The vault refused the write" + errorSuffix();
+                    case "verify-failed":
+                        return "The write did not stick";
+                    case "malformed":
+                        return "The vault record has an unknown shape";
+                    case "bad-mode":
+                        return "Internal error";
+                    case "no-answer":
+                        return firstLine(raw);
+                    default:
+                        break;
+                }
+                if (!known()) {
+                    return "Unknown (" + state + ")";
+                }
+                String flags = "lock=" + lock + ", maintenance=" + maintenance
+                        + ", at=" + at;
+                if (at == 1) {
+                    return "Allowed · " + flags;
+                }
+                if (gated()) {
+                    return "D2 blocked · " + flags;
+                }
+                if (lock == 0) {
+                    return "Not gated · " + flags;
+                }
+                return "Not authorized · " + flags;
+            }
+
             switch (state) {
                 case "unsupported":
-                    return "Not available on this firmware";
+                    return context.getString(R.string.d2_unsupported);
                 case "no-vault":
-                    return "No DMC vault on this firmware";
+                    return context.getString(R.string.d2_no_vault);
                 case "uid-failed":
-                    return "Could not switch to the system uid";
+                    return context.getString(R.string.d2_uid_failed);
                 case "read-failed":
-                    return "Could not read the vault" + errorSuffix();
+                    return context.getString(R.string.d2_read_failed) + errorSuffix();
                 case "write-failed":
-                    return "The vault refused the write" + errorSuffix();
+                    return context.getString(R.string.d2_write_failed) + errorSuffix();
                 case "verify-failed":
-                    return "The write did not stick";
+                    return context.getString(R.string.d2_verify_failed);
                 case "malformed":
-                    return "The vault record has an unknown shape";
+                    return context.getString(R.string.d2_malformed);
                 case "bad-mode":
-                    return "Internal error";
+                    return context.getString(R.string.d2_bad_mode);
                 case "no-answer":
                     return firstLine(raw);
                 default:
@@ -74,15 +118,15 @@ final class DownloadMode {
             String flags = "lock=" + lock + ", maintenance=" + maintenance
                     + ", at=" + at;
             if (at == 1) {
-                return "Allowed · " + flags;
+                return context.getString(R.string.d2_allowed, flags);
             }
             if (gated()) {
-                return "D2 blocked · " + flags;
+                return context.getString(R.string.d2_blocked, flags);
             }
             if (lock == 0) {
-                return "Not gated · " + flags;
+                return context.getString(R.string.d2_not_gated, flags);
             }
-            return "Not authorized · " + flags;
+            return context.getString(R.string.d2_not_authorized, flags);
         }
 
         private String errorSuffix() {

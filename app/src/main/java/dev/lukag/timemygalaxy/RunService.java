@@ -71,7 +71,7 @@ public class RunService extends Service {
                 build = value;
             }
         }
-        notify("Supervising " + build);
+        notify(getString(R.string.notification_supervising, build));
         return START_NOT_STICKY;
     }
 
@@ -82,7 +82,7 @@ public class RunService extends Service {
                 PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         Notification notification = new NotificationCompat.Builder(this, CHANNEL)
                 .setSmallIcon(R.drawable.ic_stat_run)
-                .setContentTitle("Time My Galaxy")
+                .setContentTitle(getString(R.string.app_name))
                 .setContentText(text)
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
@@ -103,9 +103,9 @@ public class RunService extends Service {
         if (manager == null) {
             return;
         }
-        NotificationChannel channel = new NotificationChannel(CHANNEL, "Exploit runs",
+        NotificationChannel channel = new NotificationChannel(CHANNEL, getString(R.string.notification_channel_name),
                 NotificationManager.IMPORTANCE_LOW);
-        channel.setDescription("Keeps a running exploit supervised");
+        channel.setDescription(getString(R.string.notification_channel_desc));
         manager.createNotificationChannel(channel);
     }
 

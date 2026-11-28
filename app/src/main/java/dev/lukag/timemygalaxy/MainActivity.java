@@ -35,8 +35,10 @@ import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.app.AppCompatDelegate;
 import androidx.core.content.FileProvider;
 import androidx.core.graphics.Insets;
+import androidx.core.os.LocaleListCompat;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
@@ -123,6 +125,9 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
     private Button checkButton;
     private TextView commandOutput;
     private MaterialSwitch darkSwitch;
+    private TextView languageCurrent;
+    private Button languageButton;
+    private View languageCard;
     private MaterialSwitch providerSwitch;
     private TextView providerNote;
     private Button customButton;
@@ -342,6 +347,9 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
         commandButton = view.findViewById(R.id.commandButton);
         checkButton = view.findViewById(R.id.checkButton);
         darkSwitch = view.findViewById(R.id.darkSwitch);
+        languageCurrent = view.findViewById(R.id.languageCurrent);
+        languageButton = view.findViewById(R.id.languageButton);
+        languageCard = view.findViewById(R.id.languageCard);
         providerSwitch = view.findViewById(R.id.providerSwitch);
         providerNote = view.findViewById(R.id.providerNote);
 
@@ -387,6 +395,15 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
             recreate();
         });
 
+        refreshLanguageDisplay();
+        View.OnClickListener languageClick = v -> showLanguageDialog();
+        if (languageButton != null) {
+            languageButton.setOnClickListener(languageClick);
+        }
+        if (languageCard != null) {
+            languageCard.setOnClickListener(languageClick);
+        }
+
         providerSwitch.setChecked(Provider.selected(this) == Provider.NEXT);
         providerSwitch.setOnCheckedChangeListener((button, checked) -> {
             if (providerSync) {
@@ -400,11 +417,9 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
                 providerSwitch.setChecked(false);
                 providerSync = false;
                 new MaterialAlertDialogBuilder(this)
-                        .setTitle("KernelSU-Next not in this payload")
-                        .setMessage("The loaded payload does not carry ksud-next. "
-                                + "Refresh the payload (tap the build chip) or update "
-                                + "the app first.")
-                        .setPositiveButton("OK", null)
+                        .setTitle(R.string.dialog_ksu_next_unavailable_title)
+                        .setMessage(R.string.dialog_ksu_next_unavailable_msg)
+                        .setPositiveButton(R.string.ok, null)
                         .show();
                 return;
             }
@@ -426,6 +441,60 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
         }
     }
 
+    private void refreshLanguageDisplay() {
+        if (languageCurrent == null) {
+            return;
+        }
+        LocaleListCompat locales = AppCompatDelegate.getApplicationLocales();
+        if (locales.isEmpty()) {
+            languageCurrent.setText(R.string.language_system_default);
+        } else {
+            String tag = locales.toLanguageTags();
+            if (tag.startsWith("pt")) {
+                languageCurrent.setText(R.string.language_pt_br);
+            } else if (tag.startsWith("en")) {
+                languageCurrent.setText(R.string.language_en);
+            } else {
+                java.util.Locale first = locales.get(0);
+                languageCurrent.setText(first != null ? first.getDisplayName(first) : tag);
+            }
+        }
+    }
+
+    private void showLanguageDialog() {
+        String[] options = {
+                getString(R.string.language_system_default),
+                getString(R.string.language_pt_br),
+                getString(R.string.language_en)
+        };
+        LocaleListCompat current = AppCompatDelegate.getApplicationLocales();
+        int selected = 0;
+        if (!current.isEmpty()) {
+            String tag = current.toLanguageTags();
+            if (tag.startsWith("pt")) {
+                selected = 1;
+            } else if (tag.startsWith("en")) {
+                selected = 2;
+            }
+        }
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.dialog_language_title)
+                .setSingleChoiceItems(options, selected, (dialog, which) -> {
+                    dialog.dismiss();
+                    LocaleListCompat targetLocale;
+                    if (which == 1) {
+                        targetLocale = LocaleListCompat.forLanguageTags("pt-BR");
+                    } else if (which == 2) {
+                        targetLocale = LocaleListCompat.forLanguageTags("en");
+                    } else {
+                        targetLocale = LocaleListCompat.getEmptyLocaleList();
+                    }
+                    AppCompatDelegate.setApplicationLocales(targetLocale);
+                })
+                .setNegativeButton(R.string.cancel, null)
+                .show();
+    }
+
     private void bindHistoryPage(View view) {
         historyList = view.findViewById(R.id.historyList);
         historyEmpty = view.findViewById(R.id.historyEmpty);
@@ -442,19 +511,19 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
 
         if (shizukuChip != null) {
             shizukuChip.setText("● " + (running
-                    ? (granted ? "Shizuku ready" : "Shizuku permission")
-                    : "Shizuku off"));
+                    ? (granted ? getString(R.string.shizuku_ready) : getString(R.string.shizuku_permission))
+                    : getString(R.string.shizuku_off)));
         }
         if (buildChip != null) {
             buildChip.setText(hasPayload
-                    ? "● " + target.build + (target.custom ? " · custom"
-                            : target.verified ? "" : " · untested")
-                    : "● No payload");
+                    ? "● " + target.build + (target.custom ? " · " + getString(R.string.custom)
+                            : target.verified ? "" : " · " + getString(R.string.untested))
+                    : "● " + getString(R.string.no_payload));
         }
         Provider custom = customProvider;
         if (customStatus != null) {
             customStatus.setText(customTarget == null || custom == null ? ""
-                    : "Custom: " + customTarget.build + " · " + custom.versionName);
+                    : getString(R.string.custom) + ": " + customTarget.build + " · " + custom.versionName);
         }
         if (customClearButton != null) {
             customClearButton.setVisibility(customTarget == null ? View.GONE : View.VISIBLE);
@@ -486,7 +555,7 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
             copyButton.setEnabled(logBuffer.length() > 0);
         }
         setEnabled(!busy.get(), repairButton, buildsButton, systemUiButton, softRebootButton,
-                diagnosticsButton, updateButton, repoButton, autoUpdateSwitch);
+                diagnosticsButton, updateButton, repoButton, autoUpdateSwitch, languageButton);
         if (commandButton != null) {
             commandButton.setEnabled(!busy.get() && granted);
             checkButton.setEnabled(!busy.get() && granted);
@@ -540,13 +609,13 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
         if (downloadStatus == null || busy.get() || !d2Reading.compareAndSet(false, true)) {
             return;
         }
-        downloadStatus.setText("Checking…");
+        downloadStatus.setText(R.string.status_checking);
         executor.execute(() -> {
             DownloadMode.Status status = DownloadMode.read(this);
             d2Reading.set(false);
             ui.post(() -> {
                 if (downloadStatus != null) {
-                    downloadStatus.setText(status.text());
+                    downloadStatus.setText(status.text(this));
                 }
             });
         });
@@ -561,19 +630,10 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
             return;
         }
         new MaterialAlertDialogBuilder(this)
-                .setTitle("Authorize download mode?")
-                .setMessage("Sets the DMC authorization byte in Samsung's vault so the "
-                        + "bootloader does not answer Download Mode with the D2 error.\n\n"
-                        + "When it succeeds, power the phone off and go straight to "
-                        + "Download Mode. Android restores the original bytes while it "
-                        + "starts, so holding off the reboot keeps the authorization. "
-                        + "Authorize again before each attempt.\n\n"
-                        + "Only that one byte changes, so the worst case is Download Mode "
-                        + "still refusing. Nothing else in the record is touched.\n\n"
-                        + "This is an undocumented Samsung interface. It may not work on "
-                        + "every firmware, and it does not unlock the bootloader.")
-                .setNegativeButton("Cancel", null)
-                .setPositiveButton("Authorize", (dialog, which) -> applyDownloadMode())
+                .setTitle(R.string.dialog_download_mode_title)
+                .setMessage(R.string.dialog_download_mode_msg)
+                .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton(R.string.authorize, (dialog, which) -> applyDownloadMode())
                 .show();
     }
 
@@ -587,13 +647,13 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
                 appendLog("[*] download mode: requesting authorization\n");
                 DownloadMode.Status status = DownloadMode.authorize(this);
                 appendLog((status.authorized() ? "[+] " : "[!] ")
-                        + "download mode: " + status.text() + "\n");
+                        + "download mode: " + status.text(this) + "\n");
                 if (status.authorized()) {
                     appendLog("[*] power off, then go straight to Download Mode\n");
                 }
                 ui.post(() -> {
                     if (downloadStatus != null) {
-                        downloadStatus.setText(status.text());
+                        downloadStatus.setText(status.text(this));
                     }
                 });
             } finally {
@@ -608,15 +668,15 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
         }
         UpdateCheck.Latest latest = UpdateCheck.cached(this);
         if (latest == null) {
-            updateStatus.setText("Not checked yet");
+            updateStatus.setText(R.string.status_not_checked_yet);
             return;
         }
         StringBuilder text = new StringBuilder(latest.tag)
-                .append(" · checked ").append(RunStore.time(latest.checkedAt));
+                .append(" · ").append(getString(R.string.checked)).append(" ").append(RunStore.time(latest.checkedAt));
         if (UpdateCheck.isNewer(latest.tag)) {
-            text.append(" · update available");
+            text.append(" · ").append(getString(R.string.update_available));
         } else {
-            text.append(" · up to date");
+            text.append(" · ").append(getString(R.string.up_to_date));
         }
         updateStatus.setText(text.toString());
     }
@@ -642,7 +702,7 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
         if (latest != null && UpdateCheck.isNewer(latest.tag)) {
             line.append(" · ");
             start = line.length();
-            line.append("update ").append(latest.tag);
+            line.append(getString(R.string.update_available)).append(" ").append(latest.tag);
             addLink(line, start, line.length(), latest.url);
         }
         versionLine.setText(line);
@@ -885,9 +945,9 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
             } catch (Throwable t) {
                 appendLog("[-] custom: " + message(t) + "\n");
                 ui.post(() -> new MaterialAlertDialogBuilder(this)
-                        .setTitle("Custom payload rejected")
+                        .setTitle(R.string.dialog_custom_rejected_title)
                         .setMessage(message(t))
-                        .setPositiveButton("OK", null)
+                        .setPositiveButton(R.string.ok, null)
                         .show());
             } finally {
                 setBusy(false);
@@ -915,12 +975,10 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
 
     private void showCustomLoadedDialog(CustomPayload.Loaded loaded) {
         new MaterialAlertDialogBuilder(this)
-                .setTitle("Custom payload loaded")
-                .setMessage(loaded.target.label() + "\n" + CustomPayload.describe(loaded)
-                        + "\n\nIt is used for one plant and then deleted. Nothing about "
-                        + "it is verified: a kernel that does not match this firmware "
-                        + "can panic the phone.")
-                .setPositiveButton("OK", null)
+                .setTitle(R.string.dialog_custom_loaded_title)
+                .setMessage(getString(R.string.dialog_custom_loaded_msg,
+                        loaded.target.label(), CustomPayload.describe(loaded)))
+                .setPositiveButton(R.string.ok, null)
                 .show();
     }
 
@@ -933,11 +991,10 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
             return;
         }
         new MaterialAlertDialogBuilder(this)
-                .setTitle("Discard the custom payload?")
-                .setMessage("Deletes the extracted bundle from app storage and goes back "
-                        + "to the downloaded payload for this firmware.")
-                .setNegativeButton("Cancel", null)
-                .setPositiveButton("Discard", (d, w) -> clearCustom())
+                .setTitle(R.string.dialog_discard_custom_title)
+                .setMessage(R.string.dialog_discard_custom_msg)
+                .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton(R.string.discard, (d, w) -> clearCustom())
                 .show();
     }
 
@@ -961,14 +1018,9 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
     private void requestShizuku() {
         if (!ShizukuBridge.isRunning()) {
             new MaterialAlertDialogBuilder(this)
-                    .setTitle("Shizuku is not running")
-                    .setMessage("Start Shizuku as the shell user first.\n\n"
-                            + "Without a PC: pair through Shizuku's on-device wireless "
-                            + "debugging flow and start the service. With a PC: run\n"
-                            + "adb shell sh /storage/emulated/0/Android/data/"
-                            + "moe.shizuku.privileged.api/start.sh\n\n"
-                            + "The exploit always runs as uid 2000, never in the app sandbox.")
-                    .setPositiveButton("OK", null)
+                    .setTitle(R.string.dialog_shizuku_not_running_title)
+                    .setMessage(R.string.dialog_shizuku_not_running_msg)
+                    .setPositiveButton(R.string.ok, null)
                     .show();
             return;
         }
@@ -993,14 +1045,11 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
             }
             if (!current.verified) {
                 new MaterialAlertDialogBuilder(this)
-                        .setTitle("Untested payload")
-                        .setMessage("Payload " + current.build + " is not verified on this "
-                                + "firmware.\n\n"
-                                + "Staging copies it into " + PayloadStore.REMOTE_DIR
-                                + " and may not match the running kernel. Continue only if "
-                                + "you built it for this exact build.")
-                        .setNegativeButton("Cancel", null)
-                        .setPositiveButton("Stage anyway", (d, w) -> stageNow(current))
+                        .setTitle(R.string.dialog_untested_payload_title)
+                        .setMessage(getString(R.string.dialog_untested_payload_staging_msg,
+                                current.build, PayloadStore.REMOTE_DIR))
+                        .setNegativeButton(R.string.cancel, null)
+                        .setPositiveButton(R.string.stage_anyway, (d, w) -> stageNow(current))
                         .show();
                 return;
             }
@@ -1040,27 +1089,18 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
                 return;
             }
             Provider run = activeProvider();
-            String untested = current.verified ? "" : "\n\n"
-                    + "WARNING: payload " + current.build + " is NOT verified on this "
-                    + "firmware. An untested build can panic the kernel.";
+            String untested = current.verified ? "" : getString(R.string.exploit_untested_warning, current.build);
             if (current.custom) {
-                untested += "\n\nThis bundle was supplied by you, not the signed channel. "
-                        + "It runs once and is then deleted.";
+                untested += getString(R.string.exploit_custom_note);
             }
             new MaterialAlertDialogBuilder(this)
-                    .setTitle(current.custom ? "Run the custom payload?"
-                            : current.verified ? "Run the exploit?"
-                            : "Run the UNTESTED exploit?")
-                    .setMessage("Target " + current.build + " (" + current.describe() + ").\n\n"
-                            + "Provider " + run.label + " (" + run.versionName + ").\n\n"
-                            + "Stages the payload, then runs wr_timerfd as uid 2000 (Shizuku shell).\n\n"
-                            + "- One plant per boot. If this boot already ran it, reboot first.\n"
-                            + "- Takes roughly 10-60 s. Keep the screen on and leave the phone alone.\n"
-                            + "- On success the process parks forever and must not be killed.\n"
-                            + "- A failed plant also needs a reboot, and either can panic the kernel.\n\n"
-                            + "Run only on a device you own." + untested)
-                    .setNegativeButton("Cancel", null)
-                    .setPositiveButton(current.verified ? "Run" : "Run anyway", (d, w) ->
+                    .setTitle(current.custom ? R.string.dialog_run_custom_title
+                            : current.verified ? R.string.dialog_run_exploit_title
+                            : R.string.dialog_run_untested_exploit_title)
+                    .setMessage(getString(R.string.dialog_run_exploit_msg,
+                            current.build, current.describe(), run.label, run.versionName, untested))
+                    .setNegativeButton(R.string.cancel, null)
+                    .setPositiveButton(current.verified ? R.string.run : R.string.run_anyway, (d, w) ->
                             executeExploit())
                     .show();
         });
@@ -1444,13 +1484,10 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
             return;
         }
         new MaterialAlertDialogBuilder(this)
-                .setTitle("Restart SystemUI?")
-                .setMessage("This needs root and restarts com.android.systemui so the "
-                        + "interface reloads.\n\n"
-                        + "It does not touch a parked exploit. The screen may go black "
-                        + "for a moment and the lock screen may appear.")
-                .setNegativeButton("Cancel", null)
-                .setPositiveButton("Restart", (d, w) -> restartSystemUi())
+                .setTitle(R.string.dialog_restart_systemui_title)
+                .setMessage(R.string.dialog_restart_systemui_msg)
+                .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton(R.string.restart, (d, w) -> restartSystemUi())
                 .show();
     }
 
@@ -1468,12 +1505,9 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
                     ksuReady = false;
                     appendLog("[-] restart SystemUI needs root; su did not return uid=0\n");
                     ui.post(() -> new MaterialAlertDialogBuilder(this)
-                            .setTitle("Root required")
-                            .setMessage("Restarting SystemUI only works with root, and su did "
-                                    + "not return uid=0 on this boot.\n\n"
-                                    + "Run the exploit first and confirm root with "
-                                    + "\"Run checks\".")
-                            .setPositiveButton("OK", null)
+                            .setTitle(R.string.dialog_root_required_title)
+                            .setMessage(R.string.dialog_restart_systemui_root_required_msg)
+                            .setPositiveButton(R.string.ok, null)
                             .show());
                     return;
                 }
@@ -1509,15 +1543,10 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
             return;
         }
         new MaterialAlertDialogBuilder(this)
-                .setTitle("Soft reboot?")
-                .setMessage("This runs the same soft reboot as KernelSU Manager "
-                        + "(ksud soft-reboot).\n\n"
-                        + "Android's userspace stops and starts again: all apps close, the "
-                        + "screen goes black, and the lock screen appears.\n\n"
-                        + "The kernel is not rebooted and root stays loaded. A parked exploit "
-                        + "stays parked, and this boot's ledger entry is not cleared.")
-                .setNegativeButton("Cancel", null)
-                .setPositiveButton("Soft reboot", (d, w) -> softReboot())
+                .setTitle(R.string.dialog_soft_reboot_title)
+                .setMessage(R.string.dialog_soft_reboot_msg)
+                .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton(R.string.soft_reboot, (d, w) -> softReboot())
                 .show();
     }
 
@@ -1531,11 +1560,9 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
                     ksuReady = false;
                     appendLog("[-] soft reboot needs root; su did not return uid=0\n");
                     ui.post(() -> new MaterialAlertDialogBuilder(this)
-                            .setTitle("Root required")
-                            .setMessage("The KernelSU soft reboot needs root, and su did not "
-                                    + "return uid=0 on this boot.\n\n"
-                                    + "Run the exploit first.")
-                            .setPositiveButton("OK", null)
+                            .setTitle(R.string.dialog_root_required_title)
+                            .setMessage(R.string.dialog_soft_reboot_root_required_msg)
+                            .setPositiveButton(R.string.ok, null)
                             .show());
                     return;
                 }
@@ -1572,14 +1599,10 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
 
     private void confirmDiagnostics() {
         new MaterialAlertDialogBuilder(this)
-                .setTitle("Export diagnostics?")
-                .setMessage("Writes every log from " + PayloadStore.REMOTE_DIR
-                        + " and this session's app log to one text file, then opens the "
-                        + "share sheet.\n\n"
-                        + "Nothing is trimmed or capped. Works without root; root adds the "
-                        + "files that only su can read.")
-                .setNegativeButton("Cancel", null)
-                .setPositiveButton("Export", (d, w) -> exportDiagnostics())
+                .setTitle(R.string.dialog_export_diagnostics_title)
+                .setMessage(getString(R.string.dialog_export_diagnostics_msg, PayloadStore.REMOTE_DIR))
+                .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton(R.string.export, (d, w) -> exportDiagnostics())
                 .show();
     }
 
@@ -1703,7 +1726,7 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
             return;
         }
         clipboard.setPrimaryClip(ClipData.newPlainText("Time My Galaxy log", text));
-        Toast.makeText(this, "Log copied", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, R.string.log_copied, Toast.LENGTH_SHORT).show();
     }
 
     private void rebuildHistory() {
@@ -1723,19 +1746,18 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
             ((TextView) item.findViewById(R.id.runBuild)).setText(run.build);
             ((TextView) item.findViewById(R.id.runWhen)).setText(RunStore.time(run.startedAt));
             TextView detail = item.findViewById(R.id.runDetail);
-            detail.setText(run.detail == null || run.detail.isEmpty() ? "No detail" : run.detail);
-            ((TextView) item.findViewById(R.id.runMeta)).setText(run.meta());
+            detail.setText(run.detail == null || run.detail.isEmpty() ? getString(R.string.no_detail) : run.detail);
+            ((TextView) item.findViewById(R.id.runMeta)).setText(run.meta(this));
             historyList.addView(item);
         }
     }
 
     private void confirmClearHistory() {
         new MaterialAlertDialogBuilder(this)
-                .setTitle("Clear history?")
-                .setMessage("Removes the saved run cards. The boot ledger and the logs in "
-                        + PayloadStore.REMOTE_DIR + " are not touched.")
-                .setNegativeButton("Cancel", null)
-                .setPositiveButton("Clear", (d, w) -> {
+                .setTitle(R.string.dialog_clear_history_title)
+                .setMessage(getString(R.string.dialog_clear_history_msg, PayloadStore.REMOTE_DIR))
+                .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton(R.string.clear, (d, w) -> {
                     RunStore.clearHistory(this);
                     rebuildHistory();
                 })
@@ -1744,9 +1766,9 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
 
     private void showLedgerDialog(String message) {
         new MaterialAlertDialogBuilder(this)
-                .setTitle("Reboot required")
+                .setTitle(R.string.dialog_reboot_required_title)
                 .setMessage(message)
-                .setPositiveButton("OK", null)
+                .setPositiveButton(R.string.ok, null)
                 .show();
     }
 
@@ -1873,17 +1895,14 @@ public class MainActivity extends AppCompatActivity implements PayloadStore.Log 
         if (gateResult != null) {
             message.append(gateResult.detail).append("\n\n");
         }
-        message.append("No payload is available for this firmware build.\n\n")
-                .append("Connect to the internet and try again. If this build is not "
-                        + "supported yet, there is nothing to download.\n\n")
-                .append("The bundle is downloaded once and then kept for offline use.");
+        message.append(getString(R.string.dialog_payload_unavailable_msg));
         if (payloadError != null) {
-            message.append("\n\nLast error: ").append(payloadError);
+            message.append(getString(R.string.dialog_payload_unavailable_last_error, payloadError));
         }
         new MaterialAlertDialogBuilder(this)
-                .setTitle("Payload not available")
+                .setTitle(R.string.dialog_payload_unavailable_title)
                 .setMessage(message.toString())
-                .setPositiveButton("OK", null)
+                .setPositiveButton(R.string.ok, null)
                 .show();
     }
 
