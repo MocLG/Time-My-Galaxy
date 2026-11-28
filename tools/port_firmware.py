@@ -873,15 +873,17 @@ def derive(elf: Elf, symbols: dict[str, tuple[int, str]], funcs: list[tuple[int,
         warn("prepare_ro_creds not found; the cred_ro diagnostic scan is disabled")
     # dup_task_struct is a separate symbol on most builds. LTO kernels inline
     # it into copy_process, where its task_struct allocation remains the first
-    # kmem_cache_alloc_node call.
+    # allocation call. Kernels before 6.x call kmem_cache_alloc directly instead
+    # of the _node variant, so the node names are tried first and the plain
+    # ones are the fallback.
     if "dup_task_struct" in symbols:
         task_func = "dup_task_struct"
     else:
         task_func = "copy_process"
-        warn("dup_task_struct is inlined; using the first kmem_cache_alloc_node call in copy_process")
-    task_site = ret_after_first_bl(elf, symbols, funcs, task_func, alloc_node)
+        warn("dup_task_struct is inlined; using the first allocation call in copy_process")
+    task_site = ret_after_first_bl(elf, symbols, funcs, task_func, alloc_node + alloc)
     add("COPY_PROCESS_LOW16", task_site & 0xFFFF,
-        f"return address of first bl kmem_cache_alloc_node in {task_func} & 0xffff")
+        f"return address of first bl task allocation in {task_func} & 0xffff")
 
     # Struct sizes / member offsets from BTF.
     add("TIMER_ALLOC", btf_size("k_itimer"), "sizeof(struct k_itimer)")
