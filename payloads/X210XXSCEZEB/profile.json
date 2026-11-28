@@ -2395,7 +2395,8 @@
     "TASK_ALLOC_BYTES": "0x12c0",
     "TIMER_ALLOC": "0x108",
     "TIMER_SITE_LOW16": "0x1940",
-    "VMEMMAP_BASE": "0xfffffffe00000000"
+    "VMEMMAP_BASE": "0xfffffffe00000000",
+    "X210_DEBUG": "1"
   },
   "verified": false,
   "warnings": [
